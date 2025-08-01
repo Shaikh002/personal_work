@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import json
 import time
@@ -8,8 +7,8 @@ import re
 import random
 import sys
 from pathlib import Path
+import requests
 
-import requests  # ensure in requirements.txt
 from yt_dlp import YoutubeDL
 from playwright.async_api import async_playwright
 from google.oauth2.credentials import Credentials
@@ -18,16 +17,20 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from google.auth.transport.requests import Request
 
-# === CONFIG / ENV ===
+# GPT API
+import openai
+
+# === CONFIG ===
 INSTAGRAM_PROFILE = os.getenv("INSTAGRAM_PROFILE", "").strip()
-IG_COOKIES_JSON = os.getenv("IG_COOKIES_JSON")  # raw JSON string of Instagram cookies
+IG_COOKIES_JSON = os.getenv("IG_COOKIES_JSON")
 PROCESSED_FILE = Path("processed_reels.json")
 DOWNLOAD_DIR = Path("downloads")
-TOKEN_FILE = Path("token.json")  # token.json must already exist (restored by workflow)
-UPLOAD_LIMIT = int(os.getenv("UPLOAD_LIMIT", "1"))  # one reel per run
+TOKEN_FILE = Path("token.json")
+UPLOAD_LIMIT = int(os.getenv("UPLOAD_LIMIT", "1"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 MAX_SHORT_SECONDS = 60
-WAIT_BETWEEN_UPLOADS = 3 * 60 * 60  # if multiple, wait (not used when limit=1)
+WAIT_BETWEEN_UPLOADS = 3 * 60 * 60
 USER_AGENT_IPHONE = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 "
@@ -36,59 +39,52 @@ USER_AGENT_IPHONE = (
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 
-# Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Telegram
+
 def send_telegram(message: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        # silent if not configured
         return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", data={
             "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
             "parse_mode": "Markdown"
-        }
-        requests.post(url, data=payload, timeout=10)
+        }, timeout=10)
+    except Exception:
+        pass
+
+# Stopwords and tags
+_STOPWORDS = {"the", "and", "for", "with", "this", "that", "from", "your", "you", "are", "about", "have", "has", "not", "but", "just", "what", "when", "where", "who", "why", "how", "its", "it's", "can", "will", "get", "like", "new"}
+HACKING_TAGS = ["#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec", "#penetrationtesting"]
+TRENDING_TAGS = ["#viral", "#trending", "#Shorts", "#foryou", "#tech", "#contentcreator"]
+
+# GPT Title Generator
+def generate_gpt_title(caption: str, hashtags: str) -> str:
+    if not OPENAI_API_KEY:
+        return caption[:60].strip()
+    try:
+        openai.api_key = OPENAI_API_KEY
+        prompt = f"""You are a premium YouTube title expert. Create an eye-catching YouTube Shorts title under 70 characters based on the following:
+Caption: {caption}
+Hashtags: {hashtags}
+Audience: Indian youth interested in hacking, tech, automation. 
+Avoid using the Instagram username or emojis. Only English. Title must be extremely clickable."""
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=50,
+            temperature=0.7
+        )
+        return response['choices'][0]['message']['content'].strip()
     except Exception as e:
-        print(f"⚠️ Failed to send Telegram message: {e}")
+        send_telegram(f"❌ GPT Title Fail: {e}")
+        return caption[:60].strip()
 
-# === STOPWORDS for keyword extraction ===
-_STOPWORDS = {
-    "the", "and", "for", "with", "this", "that", "from", "your", "you", "are",
-    "about", "have", "has", "not", "but", "just", "what", "when", "where",
-    "who", "why", "how", "its", "it's", "can", "will", "get", "like", "new"
-}
-
-# === HASHTAGS POOLS ===
-HACKING_TAGS = [
-    "#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec",
-    "#penetrationtesting", "#redteam", "#vulnerability", "#securityresearch",
-    "#threatintel", "#whitehat", "#hackerlife", "#securitytips", "#hackingtools"
-]
-TRENDING_TAGS = [
-    "#viral", "#trending", "#Shorts", "#foryou", "#explore", "#tech",
-    "#contentcreator", "#daily", "#automation", "#viralshorts"
-]
-
-# === UTILITIES ===
-def load_processed():
-    if PROCESSED_FILE.exists():
-        try:
-            return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
-        except Exception:
-            print("⚠️ Warning: processed_reels.json corrupted, resetting.")
-            return set()
-    return set()
-
-def save_processed(processed_set):
-    PROCESSED_FILE.write_text(json.dumps(list(processed_set), indent=2), encoding="utf-8")
-
+# Hashtags
 def extract_keywords(text, count=2):
-    if not text:
-        return []
     words = re.findall(r"\b[a-zA-Z0-9]{3,}\b", text.lower())
     freq = {}
     for w in words:
@@ -100,110 +96,58 @@ def extract_keywords(text, count=2):
 
 def generate_hacking_trending_hashtags(caption, total=8):
     keywords = extract_keywords(caption, count=2)
-    chosen = []
-    for k in keywords:
-        if len(chosen) < total:
-            chosen.append(k)
-    for tag in HACKING_TAGS:
-        if len(chosen) >= total:
-            break
-        if tag.lower() not in (t.lower() for t in chosen):
-            chosen.append(tag)
-    for tag in TRENDING_TAGS:
-        if len(chosen) >= total:
-            break
-        if tag.lower() not in (t.lower() for t in chosen):
-            chosen.append(tag)
-    return " ".join(chosen[:total])
+    combined = keywords + [t for t in HACKING_TAGS + TRENDING_TAGS if t not in keywords]
+    return " ".join(combined[:total])
 
+# Duration Trim
 def get_duration(path):
     try:
-        out = subprocess.check_output([
-            FFMPEG.replace("ffmpeg","ffprobe") if False else FFPROBE, "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            path
-        ]).decode().strip()
-        return float(out)
+        out = subprocess.check_output([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path])
+        return float(out.decode().strip())
     except Exception:
         return 0.0
 
 def trim_short(path):
-    dur = get_duration(path)
-    if dur > MAX_SHORT_SECONDS:
-        base, ext = os.path.splitext(path)
-        out = f"{base}_short{ext}"
-        subprocess.run([
-            FFMPEG, "-y", "-i", path,
-            "-t", str(MAX_SHORT_SECONDS),
-            "-c", "copy", out
-        ], check=True)
+    if get_duration(path) > MAX_SHORT_SECONDS:
+        out = f"{os.path.splitext(path)[0]}_short.mp4"
+        subprocess.run([FFMPEG, "-y", "-i", path, "-t", str(MAX_SHORT_SECONDS), "-c", "copy", out], check=True)
         return out
     return path
 
-# === YOUTUBE CLIENT ===
+# YouTube Upload
 def get_youtube_client():
     if not TOKEN_FILE.exists():
-        msg = "❌ YouTube credentials missing. token.json not found. You must generate a fresh token locally with offline OAuth and update the secret."
-        print(msg)
-        send_telegram(f"❌ [YouTube] {msg}")
+        send_telegram("❌ token.json missing")
         sys.exit(1)
-    try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
-    except Exception as e:
-        msg = f"❌ Failed to load YouTube credentials: {e}"
-        print(msg)
-        send_telegram(f"❌ [YouTube] {msg}")
-        sys.exit(1)
-
+    creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
     if not creds.valid:
         if creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                    f.write(creds.to_json())
-                print("✅ Refreshed YouTube token saved back to token.json")
-            except Exception as e:
-                msg = f"❌ Failed to refresh YouTube token: {e}"
-                print(msg)
-                send_telegram(f"❌ [YouTube] {msg}")
-                sys.exit(1)
+            creds.refresh(Request())
+            with open(TOKEN_FILE, "w") as f:
+                f.write(creds.to_json())
         else:
-            msg = "❌ YouTube credentials invalid or missing refresh token. Regenerate token locally with offline access and update secret."
-            print(msg)
-            send_telegram(f"❌ [YouTube] {msg}")
+            send_telegram("❌ Invalid or missing refresh token")
             sys.exit(1)
     return build("youtube", "v3", credentials=creds)
 
 def upload_to_youtube(video_path, caption):
-    youtube = get_youtube_client()
-    title_snippet = caption[:40].strip() or f"Reel from @{INSTAGRAM_PROFILE}"
-    title = f"#{INSTAGRAM_PROFILE} Hack Reel: {title_snippet}"
     hashtags = generate_hacking_trending_hashtags(caption)
-    description = f"{caption}\n\n{hashtags}"
+    title = generate_gpt_title(caption, hashtags)
     body = {
         "snippet": {
             "title": title,
-            "description": description,
-            "tags": hashtags.split()[:10],
+            "description": f"{caption}\n\n{hashtags}",
+            "tags": hashtags.split(),
             "categoryId": "22"
         },
-        "status": {
-            "privacyStatus": "public"
-        }
+        "status": {"privacyStatus": "public"}
     }
-    print(f"📤 Uploading: {video_path}")
     try:
-        req = youtube.videos().insert(
-            part="snippet,status",
-            body=body,
-            media_body=MediaFileUpload(video_path)
-        )
+        youtube = get_youtube_client()
+        req = youtube.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(video_path))
         res = req.execute()
         vid = res.get("id")
-        msg = f"✅ Video uploaded successfully → https://youtu.be/{vid}"
-        print(msg)
-        send_telegram(f"✅ [Upload] {msg}")
+        send_telegram(f"✅ Uploaded → https://youtu.be/{vid}")
         return True
     except HttpError as e:
         reason = ""
