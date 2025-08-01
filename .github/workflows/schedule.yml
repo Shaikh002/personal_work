@@ -58,6 +58,8 @@ jobs:
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
             python auto_reels_to_youtube.py
       - name: 🔁 Commit processed_reels.json
+        env:
+           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
          git config user.name "github-actions[bot]"
          git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -65,8 +67,7 @@ jobs:
          git add processed_reels.json || true
          git diff --cached --quiet || git commit -m "🔁 Update processed reels log"
          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main || echo "⚠️ Nothing new to push"
-        env:
-           GH_PAT: ${{ secrets.GH_PAT }}
+        
 
       - name: 🧾 Dump debug if failure
         if: failure()
