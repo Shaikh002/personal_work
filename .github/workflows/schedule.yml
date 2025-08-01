@@ -9,13 +9,14 @@ jobs:
   upload_reel:
     runs-on: ubuntu-latest
     env:
-      INSTAGRAM_PROFILE: sayyed.ahmedd
+      INSTAGRAM_PROFILE: Hacksnip
       UPLOAD_LIMIT: 1
       IG_COOKIES_JSON: ${{ secrets.IG_COOKIES_JSON }}
       YT_TOKEN_JSON_B64: ${{ secrets.YT_TOKEN_JSON_B64 }}
       CLIENT_SECRETS_B64: ${{ secrets.CLIENT_SECRETS_B64 }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: 📥 Checkout repository
@@ -34,9 +35,8 @@ jobs:
       - name: 📦 Install Python dependencies & Playwright
         run: |
           python -m pip install --upgrade pip
-          # ensure required packages exist even if requirements.txt is outdated
           pip install -r requirements.txt || true
-          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright
+          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai
           playwright install --with-deps
 
       - name: 🔑 Restore YouTube credentials and client secrets
