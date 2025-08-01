@@ -14,11 +14,13 @@ from yt_dlp import YoutubeDL
 from playwright.async_api import async_playwright
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from google.auth.transport.requests import Request
 
 # === CONFIG / ENV ===
+CLIENT_SECRETS = Path("client_secrets.json") 
 INSTAGRAM_PROFILE = os.getenv("INSTAGRAM_PROFILE", "").strip()
 IG_COOKIES_JSON = os.getenv("IG_COOKIES_JSON")  # raw JSON string of Instagram cookies
 PROCESSED_FILE = Path("processed_reels.json")
@@ -137,35 +139,30 @@ def trim_short(path):
     return path
 
 def get_youtube_client():
-    if not TOKEN_FILE.exists():
-        msg = "❌ YouTube credentials missing. token.json not found."
-        print(msg)
-        send_telegram(f"❌ [YouTube] {msg}")
-        sys.exit(1)
-    try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
-    except Exception as e:
-        msg = f"❌ Failed to load YouTube credentials: {e}"
-        print(msg)
-        send_telegram(f"❌ [YouTube] {msg}")
-        sys.exit(1)
-    if not creds.valid:
-        if creds.expired and creds.refresh_token:
+    creds = None
+    if TOKEN_FILE.exists():
+        try:
+            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
+        except Exception:
+            creds = None
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
             try:
-                creds.refresh(Request())
-                with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                    f.write(creds.to_json())
-                print("✅ Refreshed YouTube token saved")
+                creds.refresh(Request())  # requires import if used
             except Exception as e:
-                msg = f"❌ Failed to refresh token: {e}"
-                print(msg)
-                send_telegram(f"❌ [YouTube] {msg}")
+                print("⚠️ Failed to refresh credentials:", e)
+                creds = None
+        if not creds or not creds.valid:
+            if not CLIENT_SECRETS.exists():
+                print("❌ client_secrets.json not found. Cannot initiate OAuth flow.")
                 sys.exit(1)
-        else:
-            msg = "❌ Credentials invalid or no refresh token."
-            print(msg)
-            send_telegram(f"❌ [YouTube] {msg}")
-            sys.exit(1)
+            print("🔑 You need to authorize YouTube access. Starting console flow...")
+            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS), YOUTUBE_SCOPES)
+            creds = flow.run_local_server(port=0)
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            print("✅ New token saved to", TOKEN_FILE)
     return build("youtube", "v3", credentials=creds)
 
 def upload_to_youtube(video_path, caption):
