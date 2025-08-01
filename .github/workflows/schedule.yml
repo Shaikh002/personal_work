@@ -1,0 +1,67 @@
+name: Upload IG Reel to YouTube
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  upload_reel:
+    runs-on: ubuntu-latest
+    env:
+      INSTAGRAM_PROFILE: sayyed.ahmedd
+      UPLOAD_LIMIT: 1
+      IG_COOKIES_JSON: ${{ secrets.IG_COOKIES_JSON }}
+      YT_TOKEN_JSON_B64: ${{ secrets.YT_TOKEN_JSON_B64 }}
+      CLIENT_SECRETS_B64: ${{ secrets.CLIENT_SECRETS_B64 }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 🧱 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libnss3 libatk-bridge2.0-0 libxss1 xvfb unzip jq
+
+      - name: 📦 Install Python dependencies & Playwright
+        run: |
+          python -m pip install --upgrade pip
+          # ensure required packages exist even if requirements.txt is outdated
+          pip install -r requirements.txt || true
+          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright
+          playwright install --with-deps
+
+      - name: 🔑 Restore YouTube credentials and client secrets
+        run: |
+          if [ -z "${YT_TOKEN_JSON_B64}" ]; then
+            echo "❌ Missing YT_TOKEN_JSON_B64 secret" >&2
+            exit 1
+          fi
+          if [ -z "${CLIENT_SECRETS_B64}" ]; then
+            echo "❌ Missing CLIENT_SECRETS_B64 secret" >&2
+            exit 1
+          fi
+          echo "${YT_TOKEN_JSON_B64}" | base64 --decode > token.json
+          echo "${CLIENT_SECRETS_B64}" | base64 --decode > client_secrets.json
+          echo "✅ Restored OAuth files"
+
+      - name: ▶️ Run upload script in virtual display
+        run: |
+          xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
+            python auto_reels_to_youtube.py
+
+      - name: 🧾 Dump debug if failure
+        if: failure()
+        run: |
+          echo "=== Debug Artifacts ==="
+          ls -la debug_reels_error.png || true
+          echo "--- processed_reels.json ---"
+          cat processed_reels.json || true
