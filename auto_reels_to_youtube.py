@@ -281,7 +281,20 @@ async def main():
             msg = f"Error processing {link}: {e}"
             print(msg)
             send_telegram(f"❌ [Process] {msg}")
-    save_processed(processed)
+    def save_processed(processed_set):
+    content = json.dumps(list(processed_set), indent=2)
+    PROCESSED_FILE.write_text(content, encoding="utf-8")
+    
+    # ✅ Telegram backup
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+            with open(PROCESSED_FILE, "rb") as f:
+                files = {"document": f}
+                data = {"chat_id": TELEGRAM_CHAT_ID, "caption": "📄 Updated processed_reels.json"}
+                requests.post(url, files=files, data=data, timeout=10)
+        except Exception as e:
+            print(f"⚠️ Failed to upload processed file to Telegram: {e}")
     send_telegram("🏁 Done. Uploaded reels.")
 
 if __name__ == "__main__":
