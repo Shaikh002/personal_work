@@ -301,10 +301,9 @@ def save_processed(processed_set):
                 if response.status_code == 200:
                     print("✅ Backup sent to Telegram.")
                 else:
-                    print(f"⚠️ Telegram upload failed: {response.text}")
+                    print(f"⚠️ Telegram upload failed: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"⚠️ Failed to upload processed file to Telegram: {e}")
-    send_telegram("🏁 Done. Uploaded reels.")
+             print(f"⚠️ Failed to upload processed file to Telegram: {e}")
 
 if __name__ == "__main__":
     try:
