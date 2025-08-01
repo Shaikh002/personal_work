@@ -281,7 +281,7 @@ async def main():
             msg = f"Error processing {link}: {e}"
             print(msg)
             send_telegram(f"❌ [Process] {msg}")
-   def save_processed(processed_set):
+def save_processed(processed_set):
     content = json.dumps(list(processed_set), indent=2)
     PROCESSED_FILE.write_text(content, encoding="utf-8")
 
