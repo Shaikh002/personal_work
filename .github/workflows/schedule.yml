@@ -63,10 +63,10 @@ jobs:
          git config user.email "github-actions[bot]@users.noreply.github.com"
          git pull --rebase
          git add processed_reels.json || true
-        git diff --cached --quiet || git commit -m "🔁 Update processed reels log"
-        git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main || echo "⚠️ Nothing new to push"
+         git diff --cached --quiet || git commit -m "🔁 Update processed reels log"
+         git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}.git HEAD:main || echo "⚠️ Nothing new to push"
         env:
-        GH_PAT: ${{ secrets.GH_PAT }}
+           GH_PAT: ${{ secrets.GH_PAT }}
 
       - name: 🧾 Dump debug if failure
         if: failure()
