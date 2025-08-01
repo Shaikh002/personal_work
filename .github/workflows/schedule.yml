@@ -57,15 +57,14 @@ jobs:
         run: |
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
             python auto_reels_to_youtube.py
-      - name: 🚀 Push updated processed_reels.json
-        if: success()
+      - name: 📦 Commit updated processed_reels.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase
-          git add processed_reels.json
-          git commit -m "🔁 Update processed reels log"
-          git push origin main || echo "⚠️ No changes to push"
+          git add processed_reels.json || true
+          git diff --cached --quiet || git commit -m "🔁 Update processed reels log"
+          git push origin main || echo "⚠️ Nothing new to push"
 
       - name: 🧾 Dump debug if failure
         if: failure()
