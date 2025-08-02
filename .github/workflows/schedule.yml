@@ -43,20 +43,20 @@ jobs:
           pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai
           playwright install --with-deps
 
-      - name: 🛑 Fail if run-id injection is detected
+      - name: 📥 Download last successful processed_reels.json artifact
         run: |
-          echo "🔍 Checking if GitHub injected run-id into this run context..."
-          echo "${{ toJSON(github.event) }}" | grep -q "run-id" && {
-            echo "❌ Detected injected run-id. Please run workflow from Actions tab, not from re-run.";
-            exit 1;
-          } || echo "✅ No run-id injection detected. Proceeding..."
+          gh run list --workflow "${GITHUB_WORKFLOW}" --branch "$GITHUB_REF_NAME" --limit 5 --json databaseId,status | jq -r \
+            '.[] | select(.status=="completed") | .databaseId' | head -n 1 > run_id.txt
 
-      - name: 📥 Download processed reels artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: processed-reels
-          path: processed-reels
-        continue-on-error: true
+          if [ -s run_id.txt ]; then
+            run_id=$(cat run_id.txt)
+            echo "📥 Found previous run ID: $run_id"
+            gh run download "$run_id" -n processed-reels -D processed-reels
+          else
+            echo "⚠️ No previous successful run found."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🧩 Move processed_reels.json to root
         run: |
@@ -70,44 +70,31 @@ jobs:
       - name: 🩹 Fallback if processed_reels.json not found
         run: |
           if [ ! -f processed_reels.json ]; then
-          echo "[]" > processed_reels.json
-          echo "⚠️ created empty processed_reels.json"
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
-          -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-          -d text="⚠️ *Fallback triggered:* processed_reels.json was missing. Recreated empty list." \
-          -d parse_mode=Markdown
+            echo "[]" > processed_reels.json
+            echo "⚠️ created empty processed_reels.json"
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+              -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+              -d text="⚠️ *Fallback triggered:* processed_reels.json was missing. Recreated empty list." \
+              -d parse_mode=Markdown
           fi
 
-      - name: 🔑 Restore YouTube credentials and client secrets
+      - name: 🔑 Restore YouTube credentials
         run: |
           echo "${{ env.YT_TOKEN_JSON_B64 }}" | base64 --decode > token.json
           echo "${{ env.CLIENT_SECRETS_B64 }}" | base64 --decode > client_secrets.json
 
-      - name: ▶️ Run upload script in virtual display
+      - name: ▶️ Run main script
         run: |
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
             python auto_reels_to_youtube.py
 
-      - name: 📂 Ensure downloads/ and JSON are recent
-        run: |
-          echo "🕵️ Checking for recently created video..."
-          find downloads/ -type f -name "*.mp4" -mmin -10 || echo "⚠️ No recent .mp4 videos found in downloads/"
-
-          echo "🕵️ Checking processed_reels.json..."
-          if [ -f processed_reels.json ]; then
-            stat processed_reels.json
-          else
-            echo "⚠️ processed_reels.json is missing"
-          fi
-     
-
       - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v4
         with:
-          name: processed-reels
-          path: processed_reels.json
-          if-no-files-found: warn
-          compression-level: 6
+           name: processed-reels
+           path: processed_reels.json
+           if-no-files-found: warn
+           compression-level: 6
 
       - name: 🗰 Dump debug if failure
         if: failure()
