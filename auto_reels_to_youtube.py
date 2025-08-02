@@ -101,7 +101,7 @@ def generate_thumbnail(text, output_path):
         return None
 
 def generate_ai_title(caption: str) -> str:
-    prompt = f"Generate a catchy YouTube Shorts title (max 70 characters) for a hacking-themed reel with this caption:\n\n{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
+    prompt = f"Generate a catchy YouTube  title (max 70 characters) for a hacking-themed reel with this caption:\n\n{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
     try:
         response = client.chat.completions.create(
             model="gpt-4",
@@ -147,9 +147,10 @@ def upload_to_youtube(video_path, caption):
     title = ai_title.strip()
     if not title.lower().endswith("#shorts"):
         title += " #shorts"
+        title = f"{title} | GhostHexx @Ghost_Hexx"
 
     hashtags = generate_hacking_trending_hashtags(caption)
-    description = f"{caption}\n\n{hashtags}"
+    description = f"{caption}\n\n{hashtags}\n\nGhostHexx @Ghost_Hexx"
     thumb_path = generate_thumbnail(ai_title, THUMBNAIL_DIR / "thumb.jpg")
 
     body = {
