@@ -19,11 +19,11 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+      - name: 📅 Checkout repository
+        uses: actions/checkout@v3
 
       - name: 🐍 Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
@@ -38,35 +38,27 @@ jobs:
           pip install -r requirements.txt || true
           pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai
           playwright install --with-deps
-
-      - name: 📥 Download processed_reels.json from last run
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: processed-reels
-          path: .
-
+ 
       - name: 🔑 Restore YouTube credentials and client secrets
         run: |
-           echo "${YT_TOKEN_JSON_B64}" | base64 --decode > token.json
-           echo "${CLIENT_SECRETS_B64}" | base64 --decode > client_secrets.json
-           echo "✅ Restored OAuth files"
+          echo "${{ env.YT_TOKEN_JSON_B64 }}" | base64 --decode > token.json
+          echo "${{ env.CLIENT_SECRETS_B64 }}" | base64 --decode > client_secrets.json
 
       - name: ▶️ Run upload script in virtual display
         run: |
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
-          python auto_reels_to_youtube.py
+            python auto_reels_to_youtube.py
 
-      - name: 🧾 Dump debug if failure
+      - name: 📂 Upload processed reels artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-reels
+          path: processed_reels.json
+
+      - name: 🗰 Dump debug if failure
         if: failure()
         run: |
           echo "=== Debug Artifacts ==="
           ls -la debug_reels_error.png || true
           echo "--- processed_reels.json ---"
-          cat processed_reels.json || true
-
-      - name: 🗃️ Upload updated processed_reels.json
-        uses: actions/upload-artifact@v4
-        with:
-          name: processed-reels
-          path: processed_reels.json
+           cat processed_reels.json || true
