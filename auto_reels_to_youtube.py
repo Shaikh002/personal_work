@@ -62,7 +62,7 @@ TRENDING_TAGS = [
 
 # === UTILITIES ===
 def send_telegram(message: str):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    if not TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -80,7 +80,9 @@ def load_processed():
     return set()
 
 def save_processed(processed_set):
-    PROCESSED_FILE.write_text(json.dumps(list(processed_set), indent=2), encoding="utf-8")
+    content = json.dumps(sorted(list(processed_set)), indent=2)
+    PROCESSED_FILE.write_text(content, encoding="utf-8")
+    print("📝 Processed reels saved locally.")
 
 def extract_keywords(text, count=2):
     if not text:
@@ -280,6 +282,15 @@ async def main():
             msg = f"Error processing {link}: {e}"
             print(msg)
             send_telegram(f"❌ [Process] {msg}")
+            
+def load_processed():
+    if PROCESSED_FILE.exists():
+        try:
+            return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
+        except Exception as e:
+            print(f"⚠️ Failed to load processed file: {e}")
+    return set()
+
 def save_processed(processed_set):
     # Sort and save to file
     content = json.dumps(sorted(list(processed_set)), indent=2)
@@ -306,8 +317,17 @@ def save_processed(processed_set):
 
     send_telegram("🏁 Done. Uploaded reels.")
 
+# === MAIN ===
+async def main():
+    send_telegram(f"🚀 Run started for @{INSTAGRAM_PROFILE}")
+    processed = load_processed()
+    # Add more logic here to process, download, upload, and update processed
+    # For now, we'll just simulate a processed reel
+    processed.add("https://www.instagram.com/reel/example")
+    save_processed(processed)
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        send_telegram("🛑 Run interrupted by user.")
+     send_telegram("🛑 Run interrupted by user.")
