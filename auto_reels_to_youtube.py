@@ -9,7 +9,7 @@ import random
 import sys
 from pathlib import Path
 
-import requests
+import requests  # ensure in requirements.txt
 from yt_dlp import YoutubeDL
 from playwright.async_api import async_playwright
 from google.oauth2.credentials import Credentials
@@ -22,13 +22,14 @@ from google.auth.transport.requests import Request
 # === CONFIG / ENV ===
 CLIENT_SECRETS = Path("client_secrets.json") 
 INSTAGRAM_PROFILE = os.getenv("INSTAGRAM_PROFILE", "").strip()
-IG_COOKIES_JSON = os.getenv("IG_COOKIES_JSON")
+IG_COOKIES_JSON = os.getenv("IG_COOKIES_JSON")  # raw JSON string of Instagram cookies
 PROCESSED_FILE = Path("processed_reels.json")
 DOWNLOAD_DIR = Path("downloads")
-TOKEN_FILE = Path("token.json")
-UPLOAD_LIMIT = int(os.getenv("UPLOAD_LIMIT", "1"))
+TOKEN_FILE = Path("token.json")  # token.json must already exist (restored by workflow)
+UPLOAD_LIMIT = int(os.getenv("UPLOAD_LIMIT", "1"))  # one reel per run
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 MAX_SHORT_SECONDS = 60
+WAIT_BETWEEN_UPLOADS = 3 * 60 * 60  # if multiple, wait (not used when limit=1)
 USER_AGENT_IPHONE = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 "
@@ -37,164 +38,280 @@ USER_AGENT_IPHONE = (
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 
+# Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-_STOPWORDS = {"the", "and", "for", "with", "this", "that", "from", "your", "you", "are",
+# === STOPWORDS for keyword extraction ===
+_STOPWORDS = {
+    "the", "and", "for", "with", "this", "that", "from", "your", "you", "are",
     "about", "have", "has", "not", "but", "just", "what", "when", "where",
     "who", "why", "how", "its", "it's", "can", "will", "get", "like", "new"
 }
 
-HACKING_TAGS = ["#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec",
+# === HASHTAGS POOLS ===
+HACKING_TAGS = [
+    "#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec",
     "#penetrationtesting", "#redteam", "#vulnerability", "#securityresearch",
-    "#threatintel", "#whitehat", "#hackerlife", "#securitytips", "#hackingtools"]
-TRENDING_TAGS = ["#viral", "#trending", "#Shorts", "#foryou", "#explore", "#tech",
-    "#contentcreator", "#daily", "#automation", "#viralshorts"]
+    "#threatintel", "#whitehat", "#hackerlife", "#securitytips", "#hackingtools"
+]
+TRENDING_TAGS = [
+    "#viral", "#trending", "#Shorts", "#foryou", "#explore", "#tech",
+    "#contentcreator", "#daily", "#automation", "#viralshorts"
+]
 
-def send_telegram(msg: str):
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        try:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        except: pass
+# === UTILITIES ===
+def send_telegram(message: str):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+        requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print(f"⚠️ Failed to send Telegram message: {e}")
 
 def load_processed():
     if PROCESSED_FILE.exists():
         try:
             return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
-        except: return set()
+        except Exception as e:
+            print(f"⚠️ Failed to load processed file: {e}")
     return set()
 
 def save_processed(processed_set):
-    PROCESSED_FILE.write_text(json.dumps(sorted(list(processed_set)), indent=2), encoding="utf-8")
-    print("📝 Processed reels saved locally.")
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        try:
-            with open(PROCESSED_FILE, "rb") as f:
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument",
-                    files={"document": f},
-                    data={"chat_id": TELEGRAM_CHAT_ID, "caption": "📄 Updated processed_reels.json"}, timeout=10)
-        except: pass
+    PROCESSED_FILE.write_text(json.dumps(list(processed_set), indent=2), encoding="utf-8")
 
 def extract_keywords(text, count=2):
+    if not text:
+        return []
     words = re.findall(r"\b[a-zA-Z0-9]{3,}\b", text.lower())
     freq = {}
     for w in words:
-        if w not in _STOPWORDS:
-            freq[w] = freq.get(w, 0) + 1
-    return [f"#{w}" for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:count]]
+        if w in _STOPWORDS:
+            continue
+        freq[w] = freq.get(w, 0) + 1
+    sorted_words = sorted(freq.items(), key=lambda x: -x[1])
+    return [f"#{w}" for w, _ in sorted_words[:count]]
 
-def generate_hashtags(caption, total=8):
+def generate_hacking_trending_hashtags(caption, total=8):
     keywords = extract_keywords(caption, count=2)
-    tags = keywords + [t for t in HACKING_TAGS + TRENDING_TAGS if t not in keywords]
-    return " ".join(tags[:total])
+    chosen = []
+    for k in keywords:
+        if len(chosen) < total:
+            chosen.append(k)
+    for tag in HACKING_TAGS:
+        if len(chosen) >= total:
+            break
+        if tag.lower() not in (t.lower() for t in chosen):
+            chosen.append(tag)
+    for tag in TRENDING_TAGS:
+        if len(chosen) >= total:
+            break
+        if tag.lower() not in (t.lower() for t in chosen):
+            chosen.append(tag)
+    return " ".join(chosen[:total])
 
 def get_duration(path):
     try:
-        return float(subprocess.check_output([FFPROBE, "-v", "error", "-show_entries",
-            "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path]).decode().strip())
-    except: return 0.0
+        out = subprocess.check_output([
+            FFMPEG.replace("ffmpeg", "ffprobe") if False else FFPROBE, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            path
+        ]).decode().strip()
+        return float(out)
+    except Exception:
+        return 0.0
 
 def trim_short(path):
     dur = get_duration(path)
     if dur > MAX_SHORT_SECONDS:
-        out = f"{os.path.splitext(path)[0]}_short.mp4"
-        subprocess.run([FFMPEG, "-y", "-i", path, "-t", str(MAX_SHORT_SECONDS), "-c", "copy", out])
+        base, ext = os.path.splitext(path)
+        out = f"{base}_short{ext}"
+        subprocess.run([
+            FFMPEG, "-y", "-i", path,
+            "-t", str(MAX_SHORT_SECONDS),
+            "-c", "copy", out
+        ], check=True)
         return out
     return path
 
 def get_youtube_client():
     creds = None
     if TOKEN_FILE.exists():
-        try: creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
-        except: pass
+        try:
+            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
+        except Exception:
+            creds = None
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            try: creds.refresh(Request())
-            except: creds = None
+            try:
+                creds.refresh(Request())  # requires import if used
+            except Exception as e:
+                print("⚠️ Failed to refresh credentials:", e)
+                creds = None
         if not creds or not creds.valid:
+            if not CLIENT_SECRETS.exists():
+                print("❌ client_secrets.json not found. Cannot initiate OAuth flow.")
+                sys.exit(1)
+            print("🔑 You need to authorize YouTube access. Starting console flow...")
             flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS), YOUTUBE_SCOPES)
             creds = flow.run_local_server(port=0)
-            with open(TOKEN_FILE, "w", encoding="utf-8") as f: f.write(creds.to_json())
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            print("✅ New token saved to", TOKEN_FILE)
     return build("youtube", "v3", credentials=creds)
 
-def upload_to_youtube(path, caption):
-    client = get_youtube_client()
-    title = f"{caption[:60].strip()} | Hack Tips"
-    description = f"{caption}\n\n{generate_hashtags(caption)}"
-    body = {"snippet": {"title": title, "description": description, "tags": description.split()[:10], "categoryId": "22"}, "status": {"privacyStatus": "public"}}
+def upload_to_youtube(video_path, caption):
+    youtube = get_youtube_client()
+    title_snippet = caption[:60].strip() or "Viral Hack Reel"
+    title = f"{title_snippet} | Hack Tips"
+    hashtags = generate_hacking_trending_hashtags(caption)
+    description = f"{caption}\n\n{hashtags}"
+    body = {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": hashtags.split()[:10],
+            "categoryId": "22"
+        },
+        "status": {"privacyStatus": "public"}
+    }
+    print(f"📤 Uploading: {video_path}")
     try:
-        req = client.videos().insert(part="snippet,status", body=body, media_body=MediaFileUpload(path))
-        vid = req.execute().get("id")
+        req = youtube.videos().insert(
+            part="snippet,status",
+            body=body,
+            media_body=MediaFileUpload(video_path)
+        )
+        res = req.execute()
+        vid = res.get("id")
         msg = f"✅ Uploaded → https://youtu.be/{vid}"
         print(msg)
-        send_telegram(msg)
+        send_telegram(f"✅ [Upload] {msg}")
         return True
     except HttpError as e:
-        print(f"❌ Upload failed: {e}")
-        send_telegram(f"❌ Upload failed: {e}")
+        msg = f"❌ Upload failed: {e}"
+        print(msg)
+        send_telegram(f"❌ [Upload] {msg}")
         return False
 
 async def inject_cookies(context):
-    if IG_COOKIES_JSON:
-        try: await context.add_cookies(json.loads(IG_COOKIES_JSON))
-        except: pass
+    if not IG_COOKIES_JSON:
+        msg = "IG_COOKIES_JSON env not set."
+        print(f"❌ {msg}")
+        send_telegram(f"❌ [Cookies] {msg}")
+        return
+    try:
+        cookies = json.loads(IG_COOKIES_JSON)
+        await context.add_cookies(cookies)
+        print("✅ Cookies injected")
+    except Exception as e:
+        msg = f"❌ Failed to inject cookies: {e}"
+        print(msg)
+        send_telegram(f"❌ [Cookies] {msg}")
 
 async def fetch_reel_links():
     if not INSTAGRAM_PROFILE:
-        send_telegram("❌ Missing INSTAGRAM_PROFILE")
+        msg = "INSTAGRAM_PROFILE not set."
+        print(f"❌ {msg}")
+        send_telegram(f"❌ [Config] {msg}")
         return []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(user_agent=USER_AGENT_IPHONE)
         await inject_cookies(context)
         page = await context.new_page()
+        target = f"https://www.instagram.com/{INSTAGRAM_PROFILE}/reels/"
+        print(f"🔍 Loading {target}")
         try:
-            await page.goto(f"https://www.instagram.com/{INSTAGRAM_PROFILE}/reels/", timeout=60000)
+            await page.goto(target, timeout=60000)
             await page.wait_for_selector('a[href*="/reel/"]', timeout=30000)
-            await page.wait_for_timeout(3000)
-            for _ in range(3):
-                await page.mouse.wheel(0, 2000)
-                await page.wait_for_timeout(1000)
+            await asyncio.sleep(2)
             hrefs = await page.eval_on_selector_all('a[href*="/reel/"]', "els => els.map(e => e.href)")
-            links = [h for h in hrefs if re.match(r"https://www.instagram.com/reel/[\w\-]+/?", h)]
-            return list(dict.fromkeys(links))
+            return list(dict.fromkeys(hrefs))
         except Exception as e:
             await page.screenshot(path="debug_reels_error.png")
-            send_telegram(f"❌ Error fetching reels: {e}")
+            msg = f"Error loading reels: {e}"
+            print(msg)
+            send_telegram(f"❌ [Reels] {msg}")
             return []
         finally:
             await browser.close()
 
 def download_reel(url):
     DOWNLOAD_DIR.mkdir(exist_ok=True)
-    opts = {"format": "mp4", "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"), "quiet": True}
+    opts = {
+        "format": "mp4",
+        "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True
+    }
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        return ydl.prepare_filename(info), info.get("description") or info.get("title") or ""
+        filename = ydl.prepare_filename(info)
+        caption = info.get("description") or info.get("title") or ""
+        caption = re.sub(r'@\w+', '', caption)
+        return filename, caption
 
 async def main():
-    send_telegram(f"🚀 Upload started for @{INSTAGRAM_PROFILE}")
+    send_telegram(f"🚀 Run started for @{INSTAGRAM_PROFILE}, limit={UPLOAD_LIMIT}")
     processed = load_processed()
     reels = await fetch_reel_links()
     to_upload = [r for r in reels if r not in processed][:UPLOAD_LIMIT]
     if not to_upload:
-        send_telegram("⚠️ No new reels found")
+        send_telegram("⚠️ No new reels to upload.")
         return
-    for url in to_upload:
+    for link in to_upload:
         try:
-            path, caption = download_reel(url)
-            trimmed = trim_short(path)
-            if upload_to_youtube(trimmed, caption):
-                processed.add(url)
-                os.remove(path)
-                if trimmed != path: os.remove(trimmed)
-            else: break
+            file, caption = download_reel(link)
+            trimmed = trim_short(file)
+            success = upload_to_youtube(trimmed, caption)
+            if success:
+                processed.add(link)
+                os.remove(file)
+                if trimmed != file:
+                    os.remove(trimmed)
+            else:
+                break
         except Exception as e:
-            send_telegram(f"❌ Error processing {url}: {e}")
+            msg = f"Error processing {link}: {e}"
+            print(msg)
+            send_telegram(f"❌ [Process] {msg}")
+    
+    # ✅ Save processed set to file and backup to Telegram
     save_processed(processed)
 
+def save_processed(processed_set):
+    # Sort and save to file
+    content = json.dumps(sorted(list(processed_set)), indent=2)
+    PROCESSED_FILE.write_text(content, encoding="utf-8")
+    print("📝 Processed reels saved locally.")
+
+    # Optional Telegram backup
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+            with open(PROCESSED_FILE, "rb") as f:
+                files = {"document": f}
+                data = {
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "caption": "📄 Updated processed_reels.json"
+                }
+                response = requests.post(url, files=files, data=data, timeout=10)
+                if response.status_code == 200:
+                    print("✅ Backup sent to Telegram.")
+                else:
+                    print(f"⚠️ Telegram upload failed: {response.text}")
+        except Exception as e:
+            print(f"⚠️ Failed to upload processed file to Telegram: {e}")
+
+    send_telegram("🏁 Done. Uploaded reels.")
+
 if __name__ == "__main__":
-    try: asyncio.run(main())
+    try:
+        asyncio.run(main())
     except KeyboardInterrupt:
-        send_telegram("🛑 Script interrupted")
+        send_telegram("🛑 Run interrupted by user.")
