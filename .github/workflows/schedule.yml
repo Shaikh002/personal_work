@@ -1,14 +1,13 @@
-name: 📤 Upload Reels to YouTube
+name: Upload IG Reel to YouTube
 
-on: 
-  workflow_dispatch:
+on:
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+    - cron: '0 */6 * * *'  # every 6 hours
+  workflow_dispatch:
 
 jobs:
-  upload:
+  upload_reel:
     runs-on: ubuntu-latest
-
     env:
       INSTAGRAM_PROFILE: Hacksnip
       UPLOAD_LIMIT: 1
@@ -20,61 +19,54 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
-      - name: ⬇️ Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 📥 Download processed reels from last run
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🧱 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libnss3 libatk-bridge2.0-0 libxss1 xvfb unzip jq
+
+      - name: 📦 Install Python dependencies & Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai
+          playwright install --with-deps
+
+      - name: 📥 Download processed_reels.json from last run
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: processed-reels
           path: .
-        continue-on-error: true
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-
-      - name: 📦 Install dependencies
+      - name: 🔑 Restore YouTube credentials and client secrets
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+           echo "${YT_TOKEN_JSON_B64}" | base64 --decode > token.json
+           echo "${CLIENT_SECRETS_B64}" | base64 --decode > client_secrets.json
+           echo "✅ Restored OAuth files"
 
-      - name: 🔐 Restore OAuth secrets
-        run: |
-          if [ -z "$YT_TOKEN_JSON_B64" ]; then
-            echo "❌ Missing YT_TOKEN_JSON_B64 secret" >&2
-            exit 1
-          fi
-          if [ -z "$CLIENT_SECRETS_B64" ]; then
-            echo "❌ Missing CLIENT_SECRETS_B64 secret" >&2
-            exit 1
-          fi
-          echo "$YT_TOKEN_JSON_B64" | base64 --decode > token.json
-          echo "$CLIENT_SECRETS_B64" | base64 --decode > client_secrets.json
-          echo "✅ Restored OAuth files"
-
-      - name: 🚀 Run auto_reels_to_youtube.py
+      - name: ▶️ Run upload script in virtual display
         run: |
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
-            python auto_reels_to_youtube.py
+          python auto_reels_to_youtube.py
 
-      - name: 🐛 Debug output
+      - name: 🧾 Dump debug if failure
+        if: failure()
         run: |
           echo "=== Debug Artifacts ==="
           ls -la debug_reels_error.png || true
           echo "--- processed_reels.json ---"
           cat processed_reels.json || true
 
-      - name: 📤 Upload processed_reels.json as artifact
+      - name: 🗃️ Upload updated processed_reels.json
         uses: actions/upload-artifact@v4
         with:
           name: processed-reels
           path: processed_reels.json
-
-      - name: 📸 Upload debug screenshot if exists
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-screenshot
-          path: debug_reels_error.png
-        if: always()
