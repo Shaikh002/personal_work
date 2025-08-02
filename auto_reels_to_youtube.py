@@ -75,9 +75,8 @@ def load_processed():
     if PROCESSED_FILE.exists():
         try:
             return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
-        except Exception:
-            print("⚠️ Warning: processed_reels.json corrupted, resetting.")
-            return set()
+        except Exception as e:
+            print(f"⚠️ Failed to load processed file: {e}")
     return set()
 
 def save_processed(processed_set):
@@ -287,7 +286,7 @@ def save_processed(processed_set):
     PROCESSED_FILE.write_text(content, encoding="utf-8")
     print("📝 Processed reels saved locally.")
 
-    # Telegram backup
+    # Optional Telegram backup
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
@@ -301,9 +300,11 @@ def save_processed(processed_set):
                 if response.status_code == 200:
                     print("✅ Backup sent to Telegram.")
                 else:
-                    print(f"⚠️ Telegram upload failed: {response.status_code} - {response.text}")
+                    print(f"⚠️ Telegram upload failed: {response.text}")
         except Exception as e:
-             print(f"⚠️ Failed to upload processed file to Telegram: {e}")
+            print(f"⚠️ Failed to upload processed file to Telegram: {e}")
+
+    send_telegram("🏁 Done. Uploaded reels.")
 
 if __name__ == "__main__":
     try:
