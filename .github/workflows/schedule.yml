@@ -24,6 +24,10 @@ jobs:
       - name: 📅 Checkout repository
         uses: actions/checkout@v3
 
+      - name: 🔧 Install GitHub CLI (for downloading artifacts)
+        run: |
+          sudo apt-get install -y gh
+
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
@@ -78,8 +82,8 @@ jobs:
 
       - name: 🔑 Restore YouTube credentials
         run: |
-          echo "${{ env.YT_TOKEN_JSON_B64 }}" | base64 --decode > token.json
-          echo "${{ env.CLIENT_SECRETS_B64 }}" | base64 --decode > client_secrets.json
+          echo "${{ env.YT_TOKEN_JSON_B64 }}" | base64 -d > token.json
+          echo "${{ env.CLIENT_SECRETS_B64 }}" | base64 -d > client_secrets.json
 
       - name: ▶️ Run main script
         run: |

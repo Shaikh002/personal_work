@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import os, json, time, asyncio, subprocess, re, random, sys
 from pathlib import Path
@@ -12,7 +11,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from google.auth.transport.requests import Request
 from PIL import Image, ImageDraw, ImageFont
-import openai
+from openai import OpenAI
 
 # === CONFIG / ENV ===
 CLIENT_SECRETS = Path("client_secrets.json") 
@@ -31,7 +30,7 @@ FFPROBE = "ffprobe"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
 
 _STOPWORDS = {"the", "and", "for", "with", "this", "that", "from", "your", "you", "are", "about", "have", "has", "not", "but", "just", "what", "when", "where", "who", "why", "how", "its", "it's", "can", "will", "get", "like", "new"}
 HACKING_TAGS = ["#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec", "#penetrationtesting", "#redteam", "#vulnerability", "#securityresearch", "#threatintel", "#whitehat", "#hackerlife", "#securitytips", "#hackingtools"]
@@ -90,7 +89,10 @@ def generate_thumbnail(text, output_path):
         THUMBNAIL_DIR.mkdir(exist_ok=True)
         img = Image.new("RGB", (1280, 720), color=(0, 0, 0))
         draw = ImageDraw.Draw(img)
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 48)
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 48)
+        except:
+            font = ImageFont.load_default()
         draw.text((100, 300), text, font=font, fill=(255, 255, 255))
         img.save(output_path)
         return output_path
@@ -101,7 +103,7 @@ def generate_thumbnail(text, output_path):
 def generate_ai_title(caption: str) -> str:
     prompt = f"Generate a catchy YouTube Shorts title (max 70 characters) for a hacking-themed reel with this caption:\n\n{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=50,
@@ -113,22 +115,39 @@ def generate_ai_title(caption: str) -> str:
         return caption[:60]
 
 def get_youtube_client():
-    try:
-        if TOKEN_FILE.exists():
+    creds = None
+    if TOKEN_FILE.exists():
+        try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), YOUTUBE_SCOPES)
-        else:
-            raise Exception("token.json missing")
-        if not creds.valid and creds.refresh_token:
-            creds.refresh(Request())
-        return build("youtube", "v3", credentials=creds)
-    except Exception as e:
-        send_telegram(f"❌ YouTube auth error: {e}")
-        sys.exit(1)
+        except Exception:
+            creds = None
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                print("⚠️ Failed to refresh credentials:", e)
+                creds = None
+        if not creds or not creds.valid:
+            if not CLIENT_SECRETS.exists():
+                print("❌ client_secrets.json not found. Cannot initiate OAuth flow.")
+                sys.exit(1)
+            print("🔑 You need to authorize YouTube access. Starting console flow...")
+            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS), YOUTUBE_SCOPES)
+            creds = flow.run_local_server(port=0)
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            print("✅ New token saved to", TOKEN_FILE)
+    return build("youtube", "v3", credentials=creds)
 
 def upload_to_youtube(video_path, caption):
     youtube = get_youtube_client()
     ai_title = generate_ai_title(caption)
-    title = f"{ai_title} #shorts"
+    title = ai_title.strip()
+    if not title.lower().endswith("#shorts"):
+        title += " #shorts"
+
     hashtags = generate_hacking_trending_hashtags(caption)
     description = f"{caption}\n\n{hashtags}"
     thumb_path = generate_thumbnail(ai_title, THUMBNAIL_DIR / "thumb.jpg")
@@ -156,6 +175,7 @@ def upload_to_youtube(video_path, caption):
     except HttpError as e:
         send_telegram(f"❌ Upload failed: {e}")
         return False
+
 
 def download_reel(url):
     DOWNLOAD_DIR.mkdir(exist_ok=True)
