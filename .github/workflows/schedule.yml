@@ -43,8 +43,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: processed-reels
-          path: .
-        continue-on-error: true  # If first run and artifact is missing
+          path: processed-reels
+        continue-on-error: true
+
+      - name: 🧩 Move processed_reels.json to root
+        run: |
+          if [ -f "processed-reels/processed_reels.json" ]; then
+            mv processed-reels/processed_reels.json ./processed_reels.json
+            echo "✅ Moved processed_reels.json to root"
+          else
+            echo "⚠️ processed_reels.json not found in artifact"
+          fi
 
       - name: 🩹 Fallback if processed_reels.json not found
         run: |
