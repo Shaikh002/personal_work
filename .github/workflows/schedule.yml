@@ -2,7 +2,9 @@ name: Upload IG Reel to YouTube
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # every 6 hours
+    - cron: '0 7 * * *'    # ⏰ 12:30 PM IST
+    - cron: '30 12 * * *'  # ⏰ 6:00 PM IST
+    - cron: '0 16 * * *'   # ⏰ 9:30 PM IST
   workflow_dispatch:
 
 jobs:
@@ -22,10 +24,6 @@ jobs:
       - name: 📅 Checkout repository
         uses: actions/checkout@v3
 
-      - name: 🧪 Debug GitHub event context
-        run: |
-          echo "${{ toJSON(github.event) }}"  
-
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
@@ -40,7 +38,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
-          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai
+          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai opencv-python pillow
           playwright install --with-deps
 
       - name: 📥 Download last successful processed_reels.json artifact
@@ -91,10 +89,10 @@ jobs:
       - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v4
         with:
-           name: processed-reels
-           path: processed_reels.json
-           if-no-files-found: warn
-           compression-level: 6
+          name: processed-reels
+          path: processed_reels.json
+          if-no-files-found: warn
+          compression-level: 6
 
       - name: 🗰 Dump debug if failure
         if: failure()
