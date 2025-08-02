@@ -228,7 +228,8 @@ async def fetch_reel_links():
         print(f"🔍 Loading {target}")
         try:
             await page.goto(target, timeout=60000)
-            await page.wait_for_selector('a[href*="/reel/"]', timeout=30000)
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_selector('a[href*="/reel/"]', timeout=60000, state='attached')
             await asyncio.sleep(2)
             hrefs = await page.eval_on_selector_all('a[href*="/reel/"]', "els => els.map(e => e.href)")
             return list(dict.fromkeys(hrefs))
@@ -256,41 +257,47 @@ def download_reel(url):
         caption = re.sub(r'@\w+', '', caption)
         return filename, caption
 
+# === MAIN FUNCTION ===
+
 async def main():
-    send_telegram(f"🚀 Run started for @{INSTAGRAM_PROFILE}, limit={UPLOAD_LIMIT}")
+    send_telegram(f"\U0001F680 Run started for @{INSTAGRAM_PROFILE}, limit={UPLOAD_LIMIT}")
     processed = load_processed()
     reels = await fetch_reel_links()
+    new_processed = []
     to_upload = [r for r in reels if r not in processed][:UPLOAD_LIMIT]
+
     if not to_upload:
         send_telegram("⚠️ No new reels to upload.")
         return
-    for link in to_upload:
+
+    for url in to_upload:
         try:
-            file, caption = download_reel(link)
+            print(f"📥 Downloading reel: {url}")
+            file, caption = download_reel(url)
             trimmed = trim_short(file)
+
+            print(f"🎬 Uploading to YouTube...")
             success = upload_to_youtube(trimmed, caption)
             if success:
-                processed.add(link)
                 os.remove(file)
                 if trimmed != file:
                     os.remove(trimmed)
-            else:
-                break
-        except Exception as e:
-            msg = f"Error processing {link}: {e}"
-            print(msg)
-            send_telegram(f"❌ [Process] {msg}")
-    
-    # ✅ Save processed set to file and backup to Telegram
-    save_processed(processed)
 
+            new_processed.append(url)  # Always add to avoid retry
+        except Exception as e:
+            print(f"❌ Upload failed for {url}: {str(e)}")
+            send_telegram(f"❌ Upload failed for reel: {url}\nReason: `{str(e)}`")
+            new_processed.append(url)  # Still mark processed
+
+    all_processed = list(set(list(processed) + new_processed))
+    save_processed(all_processed)
+
+# === UPDATED save_processed ===
 def save_processed(processed_set):
-    # Sort and save to file
     content = json.dumps(sorted(list(processed_set)), indent=2)
     PROCESSED_FILE.write_text(content, encoding="utf-8")
     print("📝 Processed reels saved locally.")
 
-    # Optional Telegram backup
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
@@ -310,6 +317,7 @@ def save_processed(processed_set):
 
     send_telegram("🏁 Done. Uploaded reels.")
 
+# === ENTRY POINT ===
 if __name__ == "__main__":
     try:
         asyncio.run(main())
