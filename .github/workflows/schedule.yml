@@ -59,10 +59,10 @@ jobs:
       - name: 📂 Upload processed reels artifact
         uses: actions/upload-artifact@v4
         with:
-          name: processed-reels
-          path: processed_reels.json
-          if-no-files-found: warn
-          compression-level: 6
+        name: processed-reels
+        path: processed_reels.json
+        if-no-files-found: warn
+        compression-level: 6
 
       - name: 🗰 Dump debug if failure
         if: failure()
