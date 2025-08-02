@@ -58,8 +58,12 @@ jobs:
       - name: 🩹 Fallback if processed_reels.json not found
         run: |
           if [ ! -f processed_reels.json ]; then
-            echo "[]" > processed_reels.json
-            echo "⚠️ created empty processed_reels.json"
+          echo "[]" > processed_reels.json
+          echo "⚠️ created empty processed_reels.json"
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+          -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+          -d text="⚠️ *Fallback triggered:* processed_reels.json was missing. Recreated empty list." \
+          -d parse_mode=Markdown
           fi
 
       - name: 🔑 Restore YouTube credentials and client secrets
@@ -71,6 +75,19 @@ jobs:
         run: |
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
             python auto_reels_to_youtube.py
+
+      - name: 📂 Ensure downloads/ and JSON are recent
+        run: |
+          echo "🕵️ Checking for recently created video..."
+          find downloads/ -type f -name "*.mp4" -mmin -10 || echo "⚠️ No recent .mp4 videos found in downloads/"
+
+          echo "🕵️ Checking processed_reels.json..."
+          if [ -f processed_reels.json ]; then
+            stat processed_reels.json
+          else
+            echo "⚠️ processed_reels.json is missing"
+          fi
+     
 
       - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v4
