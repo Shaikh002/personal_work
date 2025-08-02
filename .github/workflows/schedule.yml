@@ -38,7 +38,21 @@ jobs:
           pip install -r requirements.txt || true
           pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai
           playwright install --with-deps
- 
+
+      - name: 📥 Download processed reels artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: processed-reels
+          path: .
+        continue-on-error: true  # If first run and artifact is missing
+
+      - name: 🩹 Fallback if processed_reels.json not found
+        run: |
+          if [ ! -f processed_reels.json ]; then
+            echo "[]" > processed_reels.json
+            echo "⚠️ created empty processed_reels.json"
+          fi
+
       - name: 🔑 Restore YouTube credentials and client secrets
         run: |
           echo "${{ env.YT_TOKEN_JSON_B64 }}" | base64 --decode > token.json
@@ -49,20 +63,13 @@ jobs:
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
             python auto_reels_to_youtube.py
 
-      - name: 📥 Download processed_reels.json artifact
-        uses: actions/download-artifact@v4
-        with:
-        name: processed-reels
-        path: .
-      
-
-      - name: 📂 Upload processed reels artifact
+      - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v4
         with:
-        name: processed-reels
-        path: processed_reels.json
-        if-no-files-found: warn
-        compression-level: 6
+          name: processed-reels
+          path: processed_reels.json
+          if-no-files-found: warn
+          compression-level: 6
 
       - name: 🗰 Dump debug if failure
         if: failure()
@@ -70,4 +77,4 @@ jobs:
           echo "=== Debug Artifacts ==="
           ls -la debug_reels_error.png || true
           echo "--- processed_reels.json ---"
-           cat processed_reels.json || true
+          cat processed_reels.json || true
