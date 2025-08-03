@@ -101,8 +101,13 @@ def generate_thumbnail(text, output_path):
         return None
 
 def generate_ai_title(caption: str) -> str:
-    prompt = f"Generate a catchy YouTube Shorts title (max 70 characters) for a hacking-themed reel with this caption:\n\n{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
+    prompt = (
+        f"Generate a catchy YouTube Shorts title (max 70 characters) for a hacking-themed reel with this caption:\n\n"
+        f"{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
+    )
+    
     try:
+        # Try GPT-4 first
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
@@ -110,9 +115,21 @@ def generate_ai_title(caption: str) -> str:
             temperature=0.8
         )
         return response.choices[0].message.content.strip()
+    
     except Exception as e:
-        send_telegram(f"❌ AI Title Error: {e}")
-        return caption[:60]
+        send_telegram(f"⚠️ GPT-4 failed, falling back to gpt-3.5-turbo\nReason: {e}")
+        try:
+            # Fallback to GPT-3.5
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=50,
+                temperature=0.8
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as ex:
+            send_telegram(f"❌ GPT fallback failed: {ex}")
+            return caption[:60]
 
 def get_youtube_client():
     creds = None
