@@ -33,8 +33,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 client = OpenAI()
 
 _STOPWORDS = {"the", "and", "for", "with", "this", "that", "from", "your", "you", "are", "about", "have", "has", "not", "but", "just", "what", "when", "where", "who", "why", "how", "its", "it's", "can", "will", "get", "like", "new"}
-HACKING_TAGS = ["#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec", "#penetrationtesting", "#redteam", "#vulnerability", "#securityresearch", "#threatintel", "#whitehat", "#hackerlife", "#securitytips", "#hackingtools"]
-TRENDING_TAGS = ["#viral", "#trending", "#Shorts", "#foryou", "#explore", "#tech", "#contentcreator", "#daily", "#automation", "#viralshorts"]
+HACKING_TAGS = ["#shorts"]
+TRENDING_TAGS = ["#fyp"]
 
 def send_telegram(msg):
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
