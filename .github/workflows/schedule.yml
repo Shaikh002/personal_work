@@ -55,7 +55,7 @@ jobs:
             echo "📥 Found previous run ID: $run_id"
             gh run download "$run_id" -n processed-reels -D processed-reels
           else
-             echo "⚠️ No previous successful run found."
+            echo "⚠️ No previous successful run found."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -65,7 +65,7 @@ jobs:
             mv processed-reels/processed_reels.json ./processed_reels.json
             echo "✅ Moved processed_reels.json to root"
           else
-             echo "⚠️ processed_reels.json not found in artifact"
+            echo "⚠️ processed_reels.json not found in artifact"
 
       - name: 🩹 Fallback if processed_reels.json not found
         run: |
@@ -75,7 +75,7 @@ jobs:
             curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
               -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
               -d text="⚠️ *Fallback triggered:* processed_reels.json was missing. Recreated empty list." \
-               -d parse_mode=Markdown
+              -d parse_mode=Markdown
 
       - name: 🔑 Restore YouTube credentials
         run: |
