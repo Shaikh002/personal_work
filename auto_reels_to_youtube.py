@@ -22,7 +22,10 @@ DOWNLOAD_DIR = Path("downloads")
 THUMBNAIL_DIR = Path("thumbnails")
 TOKEN_FILE = Path("token.json")
 UPLOAD_LIMIT = int(os.getenv("UPLOAD_LIMIT", "1"))
-YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+YOUTUBE_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.force-ssl"
+]
 MAX_SHORT_SECONDS = 60
 USER_AGENT_IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1"
 FFMPEG = "ffmpeg"
@@ -33,8 +36,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 client = OpenAI()
 
 _STOPWORDS = {"the", "and", "for", "with", "this", "that", "from", "your", "you", "are", "about", "have", "has", "not", "but", "just", "what", "when", "where", "who", "why", "how", "its", "it's", "can", "will", "get", "like", "new"}
-HACKING_TAGS = ["#shorts"]
-TRENDING_TAGS = ["#fyp"]
+HACKING_TAGS = ["#ethicalhacking", "#cybersecurity", "#bugbounty", "#infosec", "#penetrationtesting", "#redteam", "#vulnerability", "#securityresearch", "#threatintel", "#whitehat", "#hackerlife", "#securitytips", "#hackingtools"]
+TRENDING_TAGS = ["#viral", "#trending", "#Shorts", "#foryou", "#explore", "#tech", "#contentcreator", "#daily", "#automation", "#viralshorts"]
 
 def send_telegram(msg):
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
@@ -44,6 +47,16 @@ def send_telegram(msg):
             requests.post(url, data=payload)
         except Exception as e:
             print(f"⚠️ Telegram error: {e}")
+
+def determine_category_id(caption: str) -> str:
+    caption_lower = caption.lower()
+    if any(kw in caption_lower for kw in ["hack", "wifi", "nmap", "bug", "exploit", "payload", "malware", "phishing", "ethical", "osint"]):
+        return "26"  # How-to & Style
+    if any(kw in caption_lower for kw in ["tutorial", "learn", "how to", "guide", "class", "course", "lesson"]):
+        return "27"  # Education
+    if any(kw in caption_lower for kw in ["review", "setup", "tech", "gadget", "automation", "linux", "ai", "tools", "app", "code", "script"]):
+        return "28"  # Science & Tech
+    return "22"  # Default
 
 def load_processed():
     if PROCESSED_FILE.exists():
@@ -74,7 +87,7 @@ def extract_keywords(text, count=2):
         freq[w] = freq.get(w, 0) + 1
     return [f"#{w}" for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:count]]
 
-def generate_hacking_trending_hashtags(caption, total=8):
+def generate_hacking_trending_hashtags(caption, total=6):
     keywords = extract_keywords(caption, count=2)
     chosen = list(keywords)
     for tag in HACKING_TAGS + TRENDING_TAGS:
@@ -100,14 +113,22 @@ def generate_thumbnail(text, output_path):
         send_telegram(f"❌ Thumbnail error: {e}")
         return None
 
+def fallback_title_from_caption(caption: str) -> str:
+    words = re.findall(r"\b[a-zA-Z0-9]{3,}\b", caption.lower())
+    stopwords = _STOPWORDS
+    filtered = [w for w in words if w not in stopwords][:3]
+    if not filtered:
+        return "🔥 Top Hacking Tips #shorts"
+    phrase = " ".join(w.title() for w in filtered)
+    return f"{phrase} Tricks 🔥 #shorts"
+
 def generate_ai_title(caption: str) -> str:
     prompt = (
         f"Generate a catchy YouTube Shorts title (max 70 characters) for a hacking-themed reel with this caption:\n\n"
         f"{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
     )
-    
+
     try:
-        # Try GPT-4 first
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
@@ -115,11 +136,10 @@ def generate_ai_title(caption: str) -> str:
             temperature=0.8
         )
         return response.choices[0].message.content.strip()
-    
+
     except Exception as e:
         send_telegram(f"⚠️ GPT-4 failed, falling back to gpt-3.5-turbo\nReason: {e}")
         try:
-            # Fallback to GPT-3.5
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
@@ -129,7 +149,7 @@ def generate_ai_title(caption: str) -> str:
             return response.choices[0].message.content.strip()
         except Exception as ex:
             send_telegram(f"❌ GPT fallback failed: {ex}")
-            return caption[:60]
+            return fallback_title_from_caption(caption)
 
 def get_youtube_client():
     creds = None
@@ -158,23 +178,91 @@ def get_youtube_client():
             print("✅ New token saved to", TOKEN_FILE)
     return build("youtube", "v3", credentials=creds)
 
+def comment_and_pin(youtube, video_id, comment_text="🔥 Follow for more hacking tips!"):
+    try:
+        comment_response = youtube.commentThreads().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {
+                            "textOriginal": comment_text
+                        }
+                    }
+                }
+            }
+        ).execute()
+
+        comment_id = comment_response["id"]
+        youtube.comments().setModerationStatus(
+            id=comment_id,
+            moderationStatus="published"
+        ).execute()
+
+        youtube.comments().markAsSpam(
+            id=comment_id,
+            spam=False
+        ).execute()
+
+        youtube.comments().setModerationStatus(
+            id=comment_id,
+            moderationStatus="published"
+        ).execute()
+
+        youtube.videos().update(
+            part="snippet",
+            body={
+                "id": video_id,
+                "snippet": {
+                    "categoryId": "27",
+                    "defaultLanguage": "en",
+                    "defaultAudioLanguage": "en",
+                    "title": "",
+                    "description": "",
+                    "tags": []
+                }
+            }
+        )
+
+        youtube.videos().update(
+            part="snippet",
+            body={
+                "id": video_id,
+                "snippet": {"description": ""}
+            }
+        )
+
+        send_telegram("📌 Auto-comment added and pinned.")
+
+    except Exception as e:
+        send_telegram(f"❌ Failed to comment/pin: {e}")
+        
+# Modify upload_to_youtube to call comment_and_pin after upload
+
 def upload_to_youtube(video_path, caption):
     youtube = get_youtube_client()
-    ai_title = generate_ai_title(caption)
-    title = ai_title.strip()
-    if not title.lower().endswith("#shorts"):
-        title += " #shorts"
+    try:
+        ai_title = generate_ai_title(caption)
+        title = ai_title.strip()
+        if not title.lower().endswith("#shorts"):
+            title += " #shorts"
+    except Exception as e:
+        send_telegram(f"❌ AI title generation failed, using fallback.\n{e}")
+        title = fallback_title_from_caption(caption)
 
-    hashtags = generate_hacking_trending_hashtags(caption)
-    description = f"{caption}\n\n{hashtags}"
-    thumb_path = generate_thumbnail(ai_title, THUMBNAIL_DIR / "thumb.jpg")
+    hashtags = generate_hacking_trending_hashtags(caption, total=6)
+    hashtags_list = hashtags.split()[:6]
+    description = f"{caption}\n\n{' '.join(hashtags_list)}"
+    thumb_path = generate_thumbnail(title, THUMBNAIL_DIR / "thumb.jpg")
 
     body = {
         "snippet": {
             "title": title,
             "description": description,
-            "tags": hashtags.split()[:10],
-            "categoryId": "27"
+            "tags": hashtags_list,
+            "categoryId": determine_category_id(caption)
+
         },
         "status": {"privacyStatus": "public"}
     }
@@ -188,6 +276,7 @@ def upload_to_youtube(video_path, caption):
         res = req.execute()
         vid = res.get("id")
         send_telegram(f"✅ Uploaded → https://youtu.be/{vid}")
+        comment_and_pin(youtube, vid)
         return True
     except HttpError as e:
         send_telegram(f"❌ Upload failed: {e}")
