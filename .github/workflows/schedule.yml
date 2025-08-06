@@ -55,8 +55,7 @@ jobs:
             echo "📥 Found previous run ID: $run_id"
             gh run download "$run_id" -n processed-reels -D processed-reels
           else
-            echo "⚠️ No previous successful run found."
-          fi
+             echo "⚠️ No previous successful run found."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,8 +65,7 @@ jobs:
             mv processed-reels/processed_reels.json ./processed_reels.json
             echo "✅ Moved processed_reels.json to root"
           else
-            echo "⚠️ processed_reels.json not found in artifact"
-          fi
+             echo "⚠️ processed_reels.json not found in artifact"
 
       - name: 🩹 Fallback if processed_reels.json not found
         run: |
@@ -77,18 +75,40 @@ jobs:
             curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
               -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
               -d text="⚠️ *Fallback triggered:* processed_reels.json was missing. Recreated empty list." \
-              -d parse_mode=Markdown
-          fi
+               -d parse_mode=Markdown
 
       - name: 🔑 Restore YouTube credentials
         run: |
           echo "${{ env.YT_TOKEN_JSON_B64 }}" | base64 -d > token.json
           echo "${{ env.CLIENT_SECRETS_B64 }}" | base64 -d > client_secrets.json
 
-      - name: ▶️ Run main script
+      - name: ▶️ Run main script with debug logging
         run: |
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
-            python auto_reels_to_youtube.py
+            python auto_reels_to_youtube.py | tee log.txt
+
+      - name: 📤 Upload debug logs if reels not found
+        if: always()
+        run: |
+          if grep -q "⚠️ No new reels found." log.txt; then
+            echo "📦 Uploading debug logs due to 0 reels"
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+              -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+              -d text="⚠️ *No reels found during GitHub run.* Possible cookie/session/profile issue. Logs uploading..." \
+              -d parse_mode=Markdown
+          fi
+        continue-on-error: true
+
+      - name: 📤 Upload Playwright logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs
+          path: |
+            debug_reels.html
+            debug_reels_hrefs.txt
+            debug_console.log
+            log.txt
+        if-no-files-found: warn
 
       - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v4
