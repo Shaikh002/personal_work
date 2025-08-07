@@ -346,7 +346,10 @@ async def fetch_reel_links():
             url = f"https://www.instagram.com/{INSTAGRAM_PROFILE}/reels/"
             await page.goto(url, timeout=60000)
             await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
+            for _ in range(5):  # Increase range for more depth
+             await page.mouse.wheel(0, 2000)
+             await asyncio.sleep(1.5)
             hrefs = await page.eval_on_selector_all('a[href*="/reel/"]', "els => els.map(e => e.href)")
             if not hrefs:
                 await upload_debug_screenshot_and_html(page)
