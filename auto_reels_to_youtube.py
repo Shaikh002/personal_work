@@ -88,6 +88,8 @@ def extract_keywords(text, count=2):
     return [f"#{w}" for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:count]]
 
 def generate_hacking_trending_hashtags(caption, total=8):
+    if not caption.strip():
+        return " ".join(HACKING_TAGS[:2] + TRENDING_TAGS[:6])  # fallback tags
     # Extract top 2 keywords from caption
     base_tags = extract_keywords(caption, count=2)
 
@@ -302,6 +304,8 @@ def download_reel(url):
             filename = ydl.prepare_filename(info)
             caption = info.get("description") or info.get("title") or ""
             caption = re.sub(r'@\w+', '', caption)
+            caption = re.sub(r'#\w+', '', caption)
+            caption = caption.strip()
             return filename, caption
     except Exception as e:
         send_telegram(f"❌ Download error for {url}: {e}")

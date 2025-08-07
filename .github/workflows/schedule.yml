@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     
     env:
-      INSTAGRAM_PROFILE: ${{ inputs.profile || 'Hacksnip' }}
+      INSTAGRAM_PROFILE: ${{ inputs.profile || 'cyberuniverse.exe' }}
       UPLOAD_LIMIT: ${{ inputs.upload_limit || 1 }}
       IG_COOKIES_JSON: ${{ secrets.IG_COOKIES_JSON }}
       YT_TOKEN_JSON_B64: ${{ secrets.YT_TOKEN_JSON_B64 }}
