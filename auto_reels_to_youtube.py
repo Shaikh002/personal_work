@@ -304,10 +304,42 @@ async def inject_cookies(context):
     except Exception as e:
         send_telegram(f"❌ Cookie injection error: {e}")
 
+async def upload_debug_screenshot_and_html(page):
+    try:
+        page_screenshot = "debug_reels.png"
+        page_html = "debug_reels.html"
+        await page.screenshot(path=page_screenshot, full_page=True)
+        html_content = await page.content()
+        Path(page_html).write_text(html_content, encoding="utf-8")
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        with open(page_screenshot, "rb") as photo:
+            requests.post(url, files={"photo": photo}, data={"chat_id": TELEGRAM_CHAT_ID, "caption": "⚠️ No reels found. Screenshot of IG page."})
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+        with open(page_html, "rb") as doc:
+            requests.post(url, files={"document": doc}, data={"chat_id": TELEGRAM_CHAT_ID, "caption": "📄 HTML content from IG page."})
+    except Exception as e:
+        send_telegram(f"❌ Failed to upload debug screenshot: {e}")
+
 async def fetch_reel_links():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent=USER_AGENT_IPHONE)
+        browser = await p.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+        context = await browser.new_context(
+            user_agent=USER_AGENT_IPHONE,
+            viewport={"width": 375, "height": 812},
+            device_scale_factor=2,
+            is_mobile=True,
+            has_touch=True,
+            locale="en-US"
+        )
         await inject_cookies(context)
         page = await context.new_page()
         try:
@@ -316,6 +348,11 @@ async def fetch_reel_links():
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(2)
             hrefs = await page.eval_on_selector_all('a[href*="/reel/"]', "els => els.map(e => e.href)")
+            if not hrefs:
+                await upload_debug_screenshot_and_html(page)
+                html_content = await page.content()
+                Path("debug_reels.html").write_text(html_content, encoding="utf-8")
+                upload_debug_screenshot_and_html(page)
             return list(dict.fromkeys(hrefs))
         except Exception as e:
             send_telegram(f"❌ IG Reel Fetch Error: {e}")

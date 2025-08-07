@@ -6,13 +6,23 @@ on:
     - cron: '30 12 * * *'  # ⏰ 6:00 PM IST
     - cron: '0 16 * * *'   # ⏰ 9:30 PM IST
   workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Instagram Profile'
+        required: false
+        default: 'Hacksnip'
+      upload_limit:
+        description: 'Max Reels to Upload'
+        required: false
+        default: '1'
 
 jobs:
   upload_reel:
     runs-on: ubuntu-latest
+    fail-fast: false
     env:
-      INSTAGRAM_PROFILE: Hacksnip
-      UPLOAD_LIMIT: 1
+      INSTAGRAM_PROFILE: ${{ inputs.profile || 'Hacksnip' }}
+      UPLOAD_LIMIT: ${{ inputs.upload_limit || 1 }}
       IG_COOKIES_JSON: ${{ secrets.IG_COOKIES_JSON }}
       YT_TOKEN_JSON_B64: ${{ secrets.YT_TOKEN_JSON_B64 }}
       CLIENT_SECRETS_B64: ${{ secrets.CLIENT_SECRETS_B64 }}
@@ -98,18 +108,15 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: 📤 Upload Playwright debug logs
+      - name: 📤 Upload debug logs and screenshots
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: debug-logs
           path: |
-            debug_reels.html
-            debug_reels_hrefs.txt
-            debug_console.log
+            debug_*.*
             log.txt
-
-
+ 
       - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -117,8 +124,7 @@ jobs:
           name: processed-reels
           path: processed_reels.json
           compression-level: 6
-          
-
+ 
       - name: 🗰 Final debug on failure
         if: failure()
         run: |
@@ -127,4 +133,4 @@ jobs:
           echo "--- processed_reels.json ---"
           cat processed_reels.json || true
           echo "--- END ---"
-          
+ 
