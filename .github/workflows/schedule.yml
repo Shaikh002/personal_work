@@ -2,9 +2,12 @@ name: Upload IG Reel to YouTube
 
 on:
   schedule:
-    - cron: '0 7 * * *'    # ⏰ 12:30 PM IST
-    - cron: '30 12 * * *'  # ⏰ 6:00 PM IST
-    - cron: '0 16 * * *'   # ⏰ 9:30 PM IST
+    # 11:30 PM IST → 18:00 UTC
+  - cron: '0 18 * * *'
+  #  5:00 PM IST → 11:30 UTC
+  - cron: '30 11 * * *'
+  #  8:30 PM IST → 15:00 UTC
+  - cron: '0 15 * * *'
   workflow_dispatch:
     inputs:
       profile:
