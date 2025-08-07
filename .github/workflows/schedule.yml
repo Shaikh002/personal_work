@@ -75,6 +75,7 @@ jobs:
               -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
               -d text="⚠️ *Fallback triggered:* processed_reels.json was missing. Recreated empty list." \
               -d parse_mode=Markdown
+          fi    
 
       - name: 🔑 Restore YouTube credentials
         run: |
@@ -126,3 +127,4 @@ jobs:
           echo "--- processed_reels.json ---"
           cat processed_reels.json || true
           echo "--- END ---"
+          
