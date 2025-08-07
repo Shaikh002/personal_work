@@ -46,14 +46,16 @@ jobs:
 
       - name: 📥 Download last successful processed_reels.json
         run: |
-          gh run list --workflow "${GITHUB_WORKFLOW}" --branch "$GITHUB_REF_NAME" --limit 5 --json databaseId,status | jq -r \
-            '.[] | select(.status=="completed") | .databaseId' | head -n 1 > run_id.txt
+          echo "🔍 Searching for last successful run..."
+          run_id=$(gh run list --workflow "$GITHUB_WORKFLOW" --branch "$GITHUB_REF_NAME" --limit 5 --json databaseId,status | \
+            jq -r '.[] | select(.status=="completed") | .databaseId' | head -n 1)
 
-          if [ -s run_id.txt ]; then
-            run_id=$(cat run_id.txt)
+          if [ -n "$run_id" ]; then
+            echo "✅ Found previous run ID: $run_id"
             gh run download "$run_id" -n processed-reels -D processed-reels
           else
             echo "⚠️ No previous successful run found."
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
