@@ -19,7 +19,7 @@ on:
 jobs:
   upload_reel:
     runs-on: ubuntu-latest
-    fail-fast: false
+    
     env:
       INSTAGRAM_PROFILE: ${{ inputs.profile || 'Hacksnip' }}
       UPLOAD_LIMIT: ${{ inputs.upload_limit || 1 }}
