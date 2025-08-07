@@ -103,7 +103,7 @@ jobs:
             debug_reels_hrefs.txt
             debug_console.log
             log.txt
-        if-no-files-found: warn
+        continue-on-error: true
 
       - name: 📤 Upload processed reels artifact
         uses: actions/upload-artifact@v3
@@ -111,7 +111,7 @@ jobs:
           name: processed-reels
           path: processed_reels.json
           compression-level: 6
-          if-no-files-found: warn
+          
 
       - name: 🗰 Final debug on failure
         if: failure()
