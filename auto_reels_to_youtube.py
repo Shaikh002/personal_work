@@ -87,15 +87,17 @@ def extract_keywords(text, count=2):
         freq[w] = freq.get(w, 0) + 1
     return [f"#{w}" for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:count]]
 
-def generate_hacking_trending_hashtags(caption, total=6):
-    keywords = extract_keywords(caption, count=2)
-    chosen = list(keywords)
-    for tag in HACKING_TAGS + TRENDING_TAGS:
-        if len(chosen) >= total:
-            break
-        if tag.lower() not in (t.lower() for t in chosen):
-            chosen.append(tag)
-    return " ".join(chosen[:total])
+def generate_hacking_trending_hashtags(caption, total=8):
+    # Extract top 2 keywords from caption
+    base_tags = extract_keywords(caption, count=2)
+
+    # Predefined segment tags
+    hacking_tags = ["#ethicalhacking", "#cybersecurity"]
+    education_tags = ["#learnontiktok", "#edutech"]
+    trending_tags = ["#tech", "#shorts", "#trending", "#automation"]
+
+    combined = list(dict.fromkeys(base_tags + hacking_tags + education_tags + trending_tags))
+    return " ".join(combined[:total])
 
 def generate_thumbnail(text, output_path):
     try:
@@ -251,9 +253,17 @@ def upload_to_youtube(video_path, caption):
         send_telegram(f"❌ AI title generation failed, using fallback.\n{e}")
         title = fallback_title_from_caption(caption)
 
-    hashtags = generate_hacking_trending_hashtags(caption, total=6)
-    hashtags_list = hashtags.split()[:6]
-    description = f"{caption}\n\n{' '.join(hashtags_list)}"
+    hashtags = generate_hacking_trending_hashtags(caption, total=8)
+    hashtags_list = hashtags.split()[:8]
+
+    description = f"""{caption}
+
+     🎯 Learn hacking tools, tech tricks, automation, and ethical cybersecurity tips.
+
+     🚀 Follow for daily tutorials and #shorts content that educates and entertains!
+
+      Tags: {' '.join(hashtags_list)}
+      """
     thumb_path = generate_thumbnail(title, THUMBNAIL_DIR / "thumb.jpg")
 
     body = {
@@ -261,7 +271,7 @@ def upload_to_youtube(video_path, caption):
             "title": title,
             "description": description,
             "tags": hashtags_list,
-            "categoryId": determine_category_id(caption)
+            "categoryId": "22"
 
         },
         "status": {"privacyStatus": "public"}

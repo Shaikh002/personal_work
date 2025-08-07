@@ -10,7 +10,7 @@ on:
       profile:
         description: 'Instagram Profile'
         required: false
-        default: 'Hacksnip'
+        default: 'cyberuniverse.exe'
       upload_limit:
         description: 'Max Reels to Upload'
         required: false
