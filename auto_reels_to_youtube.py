@@ -114,19 +114,61 @@ def get_video_probe(path: str):
 def quality_label(w: int, h: int) -> str:
     """Classify as FULL HD if short side >= 1080, else SD."""
     return "FULL HD" if min(w, h) >= 1080 else "SD"
+# --- Robust Google Trends with retry + fallback ---
+CACHED_TRENDS = [
+    "AI tools", "Cybersecurity", "Ethical hacking", "Bug bounty",
+    "Linux commands", "Automation tools", "Python", "Nmap", "Kali Linux", "Malware analysis"
+]
+
+def _fetch_trends_india_raw(max_items=10, retries=3):
+    """Low-level fetch from Google Trends with retries, returns raw list (no filtering)."""
+    delay = 2
+    for attempt in range(1, retries + 1):
+        try:
+            pytrends = TrendReq(hl='en-IN', tz=330)
+            df = pytrends.trending_searches(pn='india')
+            items = [t for t in df[0].tolist() if isinstance(t, str)]
+            if items:
+                return items[:max_items]
+        except Exception as e:
+            if attempt == retries:
+                send_telegram(f"⚠️ Trends fetch failed after {retries} attempts: {e}")
+                break
+            time.sleep(delay)
+            delay *= 2  # exponential backoff
+    return []
+
 def get_trending_keywords_india(limit=5):
-    try:
-        pytrends = TrendReq(hl='en-US', tz=330)
-        trending_df = pytrends.trending_searches(pn='india')
-        keywords = [
-            kw for kw in trending_df[0].tolist()
-            if kw and any(x in kw.lower() for x in ["tech", "hack", "cyber", "ai", "app", "gadget", "phone", "security"])
-        ]
-        send_telegram(f"📈 Google Trends India: {', '.join(keywords[:limit])}")
-        return keywords[:limit]
-    except Exception as e:
-        send_telegram(f"⚠️ Google Trends fetch failed: {e}")
-        return []
+    """
+    Return up to `limit` *relevant* trend keywords for hashtagging.
+    Filters to your niche; falls back to cached topics when Trends fails.
+    """
+    niche_needles = ("tech", "hack", "cyber", "ai", "app", "gadget", "phone", "security", "linux", "tools")
+    raw = _fetch_trends_india_raw(max_items=20, retries=3)
+    if raw:
+        filtered = [kw for kw in raw if any(n in kw.lower() for n in niche_needles)]
+        if not filtered:
+            # If nothing matches niche, at least return the top few raw trends
+            filtered = raw[:limit]
+        chosen = filtered[:limit]
+        send_telegram("📈 Google Trends India (live): " + ", ".join(chosen))
+        return chosen
+    # Fallback
+    fallback = CACHED_TRENDS[:limit]
+    send_telegram("📉 Using cached trends (fallback): " + ", ".join(fallback))
+    return fallback
+
+def get_live_trends(count=5):
+    """
+    Return up to `count` live trends (unfiltered) for titles.
+    Falls back to cached topics when Trends fails.
+    """
+    raw = _fetch_trends_india_raw(max_items=count, retries=3)
+    if raw:
+        return raw[:count]
+    return CACHED_TRENDS[:count]
+# --- End robust trends ---
+
 def generate_hacking_trending_hashtags(caption, total=8):
     ig_tags = re.findall(r"#\w+", caption)
     ig_tags = list(dict.fromkeys(ig_tags))[:3]  # keep first 3 IG tags
@@ -139,6 +181,22 @@ def generate_hacking_trending_hashtags(caption, total=8):
 
     combined = list(dict.fromkeys(ig_tags + hacking_tags + trending_tags + trend_tags))
     return " ".join(combined[:total])
+
+def ensure_exact_hashtags(tags, desired=8):
+    """Deduplicate, then pad with stable niche tags to reach exactly N."""
+    base_pool = list(dict.fromkeys(tags))
+    if len(base_pool) >= desired:
+        return base_pool[:desired]
+    # deterministic padding so tags are stable
+    padding_source = list(dict.fromkeys(
+        HACKING_TAGS + TRENDING_TAGS + [f"#{t.replace(' ', '')}" for t in CACHED_TRENDS]
+    ))
+    for t in padding_source:
+        if t not in base_pool:
+            base_pool.append(t)
+        if len(base_pool) == desired:
+            break
+    return base_pool[:desired]
 
 def generate_thumbnail(text, output_path):
     try:
@@ -155,18 +213,7 @@ def generate_thumbnail(text, output_path):
     except Exception as e:
         send_telegram(f"❌ Thumbnail error: {e}")
         return None
-
-def get_live_trends(count=5):
-    """Fetch top Google Trends for India."""
-    try:
-        pytrends = TrendReq(hl='en-IN', tz=330)
-        trending_searches = pytrends.trending_searches(pn='india')
-        trends = [t for t in trending_searches[0].tolist() if isinstance(t, str)]
-        return trends[:count]
-    except Exception as e:
-        send_telegram(f"⚠️ Trends fetch failed: {e}")
-        return []
-
+ 
 def fallback_title_from_caption(caption: str) -> str:
     # Extract keywords from caption
     words = re.findall(r"\b[a-zA-Z0-9]{3,}\b", caption.lower())
@@ -271,30 +318,7 @@ def comment_and_pin(youtube, video_id, comment_text="🔥 Follow for more hackin
             id=comment_id,
             moderationStatus="published"
         ).execute()
-
-        youtube.videos().update(
-            part="snippet",
-            body={
-                "id": video_id,
-                "snippet": {
-                    "categoryId": "27",
-                    "defaultLanguage": "en",
-                    "defaultAudioLanguage": "en",
-                    "title": "",
-                    "description": "",
-                    "tags": []
-                }
-            }
-        )
-
-        youtube.videos().update(
-            part="snippet",
-            body={
-                "id": video_id,
-                "snippet": {"description": ""}
-            }
-        )
-
+        
         send_telegram("📌 Auto-comment added and pinned.")
 
     except Exception as e:
@@ -302,7 +326,7 @@ def comment_and_pin(youtube, video_id, comment_text="🔥 Follow for more hackin
         
 # Modify upload_to_youtube to call comment_and_pin after upload
 
-def upload_to_youtube(video_path, caption):
+def upload_to_youtube(video_path, caption, ig_tags):
     youtube = get_youtube_client()
     try:
         ai_title = generate_ai_title(caption)
@@ -313,26 +337,29 @@ def upload_to_youtube(video_path, caption):
         send_telegram(f"❌ AI title generation failed, using fallback.\n{e}")
         title = fallback_title_from_caption(caption)
 
-    hashtags = generate_hacking_trending_hashtags(caption, total=8)
-    hashtags_list = hashtags.split()[:8]
+    # --- Build final hashtags ---
+    trend_keywords = get_trending_keywords_india(limit=3)
+    trend_tags = [f"#{t.replace(' ', '')}" for t in trend_keywords]
+
+    raw_tags = ig_tags + HACKING_TAGS[:3] + TRENDING_TAGS[:3] + trend_tags
+    final_tags = ensure_exact_hashtags(raw_tags, desired=8)
 
     description = f"""{caption}
 
-     🎯 Learn hacking tools, tech tricks, automation, and ethical cybersecurity tips.
+🎯 Learn hacking tools, tech tricks, automation, and ethical cybersecurity tips.
+🚀 Follow for daily tutorials and #shorts content that educates and entertains!
+   Comment your favorite tool below!
 
-     🚀 Follow for daily tutorials and #shorts content that educates and entertains!
-
-      Tags: {' '.join(hashtags_list)}
-      """
+    {' '.join(final_tags)}
+"""
     thumb_path = generate_thumbnail(title, THUMBNAIL_DIR / "thumb.jpg")
 
     body = {
         "snippet": {
             "title": title,
             "description": description,
-            "tags": hashtags_list,
-            "categoryId": "22"
-
+            "tags": final_tags,
+            "categoryId": determine_category_id(caption)
         },
         "status": {"privacyStatus": "public"}
     }
@@ -353,6 +380,12 @@ def upload_to_youtube(video_path, caption):
         return False
 
 
+def filter_relevant_hashtags(caption, allowed_keywords, max_count=3):
+    """Extracts up to `max_count` hashtags from caption that match allowed_keywords."""
+    hashtags = re.findall(r"#\w+", caption)
+    hashtags = [tag for tag in hashtags if any(kw in tag.lower() for kw in allowed_keywords)]
+    return list(dict.fromkeys(hashtags))[:max_count]
+
 def download_reel(url, idx=None, total=None):
     DOWNLOAD_DIR.mkdir(exist_ok=True)
     opts = {"format": "mp4", "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"), "quiet": True}
@@ -360,20 +393,29 @@ def download_reel(url, idx=None, total=None):
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-            caption = info.get("description") or info.get("title") or ""
-            caption = re.sub(r'@\w+', '', caption)
-            caption = re.sub(r'#\w+', '', caption)
-            caption = caption.strip()
+
+            # --- Keep FULL caption for AI title ---
+            full_caption = info.get("description") or info.get("title") or ""
+            full_caption = full_caption.strip()
+
+            # --- Extract only relevant hashtags ---
+            niche_keywords = ["hack", "hacking", "cyber", "security", "bug", "tech", "ai", "automation", "linux", "tools"]
+            filtered_tags = filter_relevant_hashtags(full_caption, niche_keywords, max_count=3)
+
+            # --- Remove hashtags & @mentions from the clean caption for description/title ---
+            clean_caption = re.sub(r'@\w+', '', full_caption)
+            clean_caption = re.sub(r'#\w+', '', clean_caption).strip()
 
             # 📊 Check resolution
             w, h, fps, dur = get_video_probe(filename)
             reel_num = f"[{idx}/{total}]" if idx and total else ""
             send_telegram(
                 f"🎥 {w}x{h} @ {round(fps,1)}fps ({quality_label(w, h)}) | {round(dur,1)}s {reel_num}\n"
-                f"Profile: {INSTAGRAM_PROFILE}\nURL: {url}"
+                f"Profile: {INSTAGRAM_PROFILE}\nURL: {url}\n"
+                f"📌 Kept hashtags: {' '.join(filtered_tags) if filtered_tags else 'None'}"
             )
 
-            return filename, caption
+            return filename, clean_caption, filtered_tags
     except Exception as e:
         send_telegram(f"❌ Download error for {url}: {e}")
         raise
@@ -385,6 +427,7 @@ async def inject_cookies(context):
         await context.add_cookies(cookies)
     except Exception as e:
         send_telegram(f"❌ Cookie injection error: {e}")
+        raise  # stop if cookies fail, so IG login doesn’t break
 
 async def upload_debug_screenshot_and_html(page):
     try:
@@ -430,14 +473,14 @@ async def fetch_reel_links():
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
             for _ in range(5):  # Increase range for more depth
-             await page.mouse.wheel(0, 2000)
-             await asyncio.sleep(1.5)
+                await page.mouse.wheel(0, 2000)
+                await asyncio.sleep(1.5)
+
             hrefs = await page.eval_on_selector_all('a[href*="/reel/"]', "els => els.map(e => e.href)")
             if not hrefs:
                 await upload_debug_screenshot_and_html(page)
                 html_content = await page.content()
                 Path("debug_reels.html").write_text(html_content, encoding="utf-8")
-                upload_debug_screenshot_and_html(page)
             return list(dict.fromkeys(hrefs))
         except Exception as e:
             send_telegram(f"❌ IG Reel Fetch Error: {e}")
@@ -450,18 +493,19 @@ async def main():
     processed = load_processed()
     reels = await fetch_reel_links()
     to_upload = [r for r in reels if r not in processed][:UPLOAD_LIMIT]
+
     if not to_upload:
         send_telegram("⚠️ No new reels found.")
         return
 
     for idx, link in enumerate(to_upload, start=1):
-     try:
-        file, caption = download_reel(link, idx=idx, total=len(to_upload))
-        success = upload_to_youtube(file, caption)
-        processed.add(link)
-        os.remove(file)
-     except Exception as e:
-        send_telegram(f"❌ Processing error for {link}: {e}")
+        try:
+            file, clean_caption, filtered_tags = download_reel(link, idx=idx, total=len(to_upload))
+            success = upload_to_youtube(file, clean_caption, filtered_tags)
+            processed.add(link)
+            os.remove(file)
+        except Exception as e:
+            send_telegram(f"❌ Processing error for {link}: {e}")
 
     save_processed(processed)
 
@@ -470,3 +514,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         send_telegram("🛑 Run interrupted.")
+        
