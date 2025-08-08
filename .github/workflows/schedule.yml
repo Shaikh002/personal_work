@@ -3,11 +3,11 @@ name: Upload IG Reel to YouTube
 on:
   schedule:
     # 11:30 PM IST → 18:00 UTC
-  - cron: '0 18 * * *'
-  #  5:00 PM IST → 11:30 UTC
-  - cron: '30 11 * * *'
-  #  8:30 PM IST → 15:00 UTC
-  - cron: '0 15 * * *'
+    - cron: '0 18 * * *'
+    #  5:00 PM IST → 11:30 UTC
+    - cron: '30 11 * * *'
+    #  8:30 PM IST → 15:00 UTC
+    - cron: '0 15 * * *'
   workflow_dispatch:
     inputs:
       profile:
@@ -45,7 +45,34 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 🧱 Install system dependencies
+      # 💾 Cache pip dependencies
+      - name: 💾 Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # 💾 Cache Playwright browsers
+      - name: 💾 Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # 💾 Cache system dependencies (ffmpeg & others)
+      - name: 💾 Cache ffmpeg and sysdeps
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/ffmpeg
+          key: ${{ runner.os }}-ffmpeg-v1
+        id: ffmpeg-cache
+
+      - name: 🧱 Install system dependencies (only if missing)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libnss3 libatk-bridge2.0-0 libxss1 xvfb unzip jq
@@ -54,7 +81,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt || true
-          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai opencv-python pillow
+          pip install requests yt-dlp google-api-python-client google-auth google-auth-oauthlib playwright openai opencv-python pillow pytrends
           playwright install --with-deps
 
       - name: 📥 Download last successful processed_reels.json
@@ -117,7 +144,7 @@ jobs:
         with:
           name: debug-logs
           path: |
-            debug_*.*
+            debug_*.*  
             log.txt
  
       - name: 📤 Upload processed reels artifact
@@ -136,4 +163,3 @@ jobs:
           echo "--- processed_reels.json ---"
           cat processed_reels.json || true
           echo "--- END ---"
- 

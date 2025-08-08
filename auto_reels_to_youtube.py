@@ -12,6 +12,7 @@ from googleapiclient.http import MediaFileUpload
 from google.auth.transport.requests import Request
 from PIL import Image, ImageDraw, ImageFont
 from openai import OpenAI
+from pytrends.request import TrendReq
 
 # === CONFIG / ENV ===
 CLIENT_SECRETS = Path("client_secrets.json") 
@@ -87,18 +88,56 @@ def extract_keywords(text, count=2):
         freq[w] = freq.get(w, 0) + 1
     return [f"#{w}" for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:count]]
 
-def generate_hacking_trending_hashtags(caption, total=8):
-    if not caption.strip():
-        return " ".join(HACKING_TAGS[:2] + TRENDING_TAGS[:6])  # fallback tags
-    # Extract top 2 keywords from caption
-    base_tags = extract_keywords(caption, count=2)
+def get_video_probe(path: str):
+    """Return width, height, fps, duration (sec) using ffprobe."""
+    try:
+        cmd = [
+            FFPROBE, "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,avg_frame_rate:format=duration",
+            "-of", "json", path
+        ]
+        out = subprocess.check_output(cmd).decode("utf-8", errors="ignore")
+        data = json.loads(out)
+        stream = data["streams"][0]
+        width = int(stream.get("width", 0))
+        height = int(stream.get("height", 0))
+        afr = stream.get("avg_frame_rate", "0/1")
+        num, den = (afr.split("/") + ["1"])[:2]
+        fps = float(num) / float(den) if float(den) != 0 else 0.0
+        duration = float(data.get("format", {}).get("duration", 0.0))
+        return width, height, fps, duration
+    except Exception as e:
+        send_telegram(f"⚠️ ffprobe failed: {e}")
+        return 0, 0, 0.0, 0.0
 
-    # Predefined segment tags
+def quality_label(w: int, h: int) -> str:
+    """Classify as FULL HD if short side >= 1080, else SD."""
+    return "FULL HD" if min(w, h) >= 1080 else "SD"
+def get_trending_keywords_india(limit=5):
+    try:
+        pytrends = TrendReq(hl='en-US', tz=330)
+        trending_df = pytrends.trending_searches(pn='india')
+        keywords = [
+            kw for kw in trending_df[0].tolist()
+            if kw and any(x in kw.lower() for x in ["tech", "hack", "cyber", "ai", "app", "gadget", "phone", "security"])
+        ]
+        send_telegram(f"📈 Google Trends India: {', '.join(keywords[:limit])}")
+        return keywords[:limit]
+    except Exception as e:
+        send_telegram(f"⚠️ Google Trends fetch failed: {e}")
+        return []
+def generate_hacking_trending_hashtags(caption, total=8):
+    ig_tags = re.findall(r"#\w+", caption)
+    ig_tags = list(dict.fromkeys(ig_tags))[:3]  # keep first 3 IG tags
     hacking_tags = ["#ethicalhacking", "#cybersecurity"]
-    education_tags = ["#learnontiktok", "#edutech"]
     trending_tags = ["#tech", "#shorts", "#trending", "#automation"]
 
-    combined = list(dict.fromkeys(base_tags + hacking_tags + education_tags + trending_tags))
+    # Add trending keywords as hashtags
+    trend_keywords = get_trending_keywords_india(limit=3)
+    trend_tags = [f"#{t.replace(' ', '')}" for t in trend_keywords]
+
+    combined = list(dict.fromkeys(ig_tags + hacking_tags + trending_tags + trend_tags))
     return " ".join(combined[:total])
 
 def generate_thumbnail(text, output_path):
@@ -117,19 +156,39 @@ def generate_thumbnail(text, output_path):
         send_telegram(f"❌ Thumbnail error: {e}")
         return None
 
+def get_live_trends(count=5):
+    """Fetch top Google Trends for India."""
+    try:
+        pytrends = TrendReq(hl='en-IN', tz=330)
+        trending_searches = pytrends.trending_searches(pn='india')
+        trends = [t for t in trending_searches[0].tolist() if isinstance(t, str)]
+        return trends[:count]
+    except Exception as e:
+        send_telegram(f"⚠️ Trends fetch failed: {e}")
+        return []
+
 def fallback_title_from_caption(caption: str) -> str:
+    # Extract keywords from caption
     words = re.findall(r"\b[a-zA-Z0-9]{3,}\b", caption.lower())
-    stopwords = _STOPWORDS
-    filtered = [w for w in words if w not in stopwords][:3]
-    if not filtered:
-        return "🔥 Top Hacking Tips #shorts"
-    phrase = " ".join(w.title() for w in filtered)
-    return f"{phrase} Tricks 🔥 #shorts"
+    filtered = [w for w in words if w not in _STOPWORDS][:3]
+
+    # Fetch live trends
+    trends = get_live_trends(count=3)
+    trends_part = " ".join(trends)
+
+    # Merge caption + trends
+    base = " ".join(w.title() for w in filtered) if filtered else "Tech Tips"
+    final_title = f"{base} – {trends_part} #shorts".strip()
+    return final_title
 
 def generate_ai_title(caption: str) -> str:
+    trends = get_live_trends(count=3)
+    trends_text = ", ".join(trends) if trends else ""
     prompt = (
         f"Generate a catchy YouTube Shorts title (max 70 characters) for a hacking-themed reel with this caption:\n\n"
-        f"{caption}\n\nAvoid clickbait, keep it smart and tech-focused."
+        f"{caption}\n\n"
+        f"Include at least one of these trending Indian keywords if possible: {trends_text}\n"
+        f"Avoid clickbait, keep it smart and tech-focused."
     )
 
     try:
@@ -140,9 +199,8 @@ def generate_ai_title(caption: str) -> str:
             temperature=0.8
         )
         return response.choices[0].message.content.strip()
-
     except Exception as e:
-        send_telegram(f"⚠️ GPT-4 failed, falling back to gpt-3.5-turbo\nReason: {e}")
+        send_telegram(f"⚠️ GPT-4 failed → gpt-3.5 fallback\nReason: {e}")
         try:
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -152,7 +210,7 @@ def generate_ai_title(caption: str) -> str:
             )
             return response.choices[0].message.content.strip()
         except Exception as ex:
-            send_telegram(f"❌ GPT fallback failed: {ex}")
+            send_telegram(f"❌ AI title unavailable → Using caption+trends\nReason: {ex}")
             return fallback_title_from_caption(caption)
 
 def get_youtube_client():
@@ -295,7 +353,7 @@ def upload_to_youtube(video_path, caption):
         return False
 
 
-def download_reel(url):
+def download_reel(url, idx=None, total=None):
     DOWNLOAD_DIR.mkdir(exist_ok=True)
     opts = {"format": "mp4", "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"), "quiet": True}
     try:
@@ -306,10 +364,20 @@ def download_reel(url):
             caption = re.sub(r'@\w+', '', caption)
             caption = re.sub(r'#\w+', '', caption)
             caption = caption.strip()
+
+            # 📊 Check resolution
+            w, h, fps, dur = get_video_probe(filename)
+            reel_num = f"[{idx}/{total}]" if idx and total else ""
+            send_telegram(
+                f"🎥 {w}x{h} @ {round(fps,1)}fps ({quality_label(w, h)}) | {round(dur,1)}s {reel_num}\n"
+                f"Profile: {INSTAGRAM_PROFILE}\nURL: {url}"
+            )
+
             return filename, caption
     except Exception as e:
         send_telegram(f"❌ Download error for {url}: {e}")
         raise
+
 
 async def inject_cookies(context):
     try:
@@ -386,14 +454,14 @@ async def main():
         send_telegram("⚠️ No new reels found.")
         return
 
-    for link in to_upload:
-        try:
-            file, caption = download_reel(link)
-            success = upload_to_youtube(file, caption)
-            processed.add(link)
-            os.remove(file)
-        except Exception as e:
-            send_telegram(f"❌ Processing error for {link}: {e}")
+    for idx, link in enumerate(to_upload, start=1):
+     try:
+        file, caption = download_reel(link, idx=idx, total=len(to_upload))
+        success = upload_to_youtube(file, caption)
+        processed.add(link)
+        os.remove(file)
+     except Exception as e:
+        send_telegram(f"❌ Processing error for {link}: {e}")
 
     save_processed(processed)
 
