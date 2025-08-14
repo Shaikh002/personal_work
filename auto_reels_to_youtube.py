@@ -472,9 +472,9 @@ async def fetch_reel_links():
             await page.goto(url, timeout=60000)
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
-            for _ in range(5):  # Increase range for more depth
+            for _ in range(200):  # Increase range for more depth
                 await page.mouse.wheel(0, 2000)
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1.2)
 
             hrefs = await page.eval_on_selector_all('a[href*="/reel/"]', "els => els.map(e => e.href)")
             if not hrefs:
