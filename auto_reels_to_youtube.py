@@ -447,7 +447,7 @@ async def upload_debug_screenshot_and_html(page):
     except Exception as e:
         send_telegram(f"❌ Failed to upload debug screenshot: {e}")
 
-async def fetch_reel_links(processed: set):
+async def fetch_reel_links():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
@@ -474,31 +474,28 @@ async def fetch_reel_links(processed: set):
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
 
-            seen = set()
-            last_processed_found = False
-
-            for i in range(300):  # Max scrolls
-                hrefs = await page.eval_on_selector_all(
-                    'a[href*="/reel/"]', "els => els.map(e => e.href)"
-                )
-                for href in hrefs:
-                    if href in processed:
-                        last_processed_found = True
-                        break
-                    seen.add(href)
-
-                if last_processed_found:
-                    print(f"✅ Found last processed reel after {i+1} scrolls.")
-                    break
-
+            # ⬇️ Old manual scroll logic
+            for _ in range(10):  # 🔁 Increase or reduce based on how many reels to load
                 await page.mouse.wheel(0, 2000)
-                await asyncio.sleep(1.2)
+                await asyncio.sleep(1.5)
 
-            return list(seen)
+            # ⬇️ Extract all reel links
+            hrefs = await page.eval_on_selector_all(
+                'a[href*="/reel/"]',
+                "els => els.map(e => e.href)"
+            )
+
+            if not hrefs:
+                await upload_debug_screenshot_and_html(page)
+                html_content = await page.content()
+                Path("debug_reels.html").write_text(html_content, encoding="utf-8")
+
+            return list(dict.fromkeys(hrefs))
 
         except Exception as e:
             send_telegram(f"❌ IG Reel Fetch Error: {e}")
             return []
+
         finally:
             await browser.close()
 
@@ -506,9 +503,9 @@ async def fetch_reel_links(processed: set):
 async def main():
     send_telegram(f"🚀 Starting IG → YT run | Profile: @{INSTAGRAM_PROFILE} | Limit: {UPLOAD_LIMIT}")
     processed = load_processed()
-    reels = await fetch_reel_links(processed)
-
+    reels = await fetch_reel_links()
     to_upload = [r for r in reels if r not in processed][:UPLOAD_LIMIT]
+
     if not to_upload:
         send_telegram("⚠️ No new reels found.")
         return
@@ -523,10 +520,3 @@ async def main():
             send_telegram(f"❌ Processing error for {link}: {e}")
 
     save_processed(processed)
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        send_telegram("🛑 Run interrupted.")
-        
