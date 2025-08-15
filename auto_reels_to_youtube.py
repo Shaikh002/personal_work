@@ -507,8 +507,10 @@ async def main():
     to_upload = [r for r in reels if r not in processed][:UPLOAD_LIMIT]
 
     if not to_upload:
-        send_telegram("⚠️ No new reels found.")
-        return
+      print("⚠️ No new reels found. Sending alert...")
+      send_telegram("⚠️ No new reels found. Either all reels are uploaded or fetch failed.")
+      return
+
 
     for idx, link in enumerate(to_upload, start=1):
         try:

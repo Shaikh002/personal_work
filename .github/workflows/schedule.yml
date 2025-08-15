@@ -135,8 +135,12 @@ jobs:
               -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
               -d text="⚠️ *No reels found during GitHub run.* Possible cookie/session/profile issue.\nLogs uploaded." \
               -d parse_mode=Markdown
+          elif grep -q "No new reels found" log.txt; then
+            curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+              -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+              -d text="ℹ️ *No new reels to upload. All are already processed.*" \
+              -d parse_mode=Markdown
           fi
-        continue-on-error: true
 
       - name: 📤 Upload debug logs and screenshots
         uses: actions/upload-artifact@v4
@@ -163,3 +167,19 @@ jobs:
           echo "--- processed_reels.json ---"
           cat processed_reels.json || true
           echo "--- END ---"
+
+      - name: ✅ Telegram success alert
+        if: success()
+        run: |
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+            -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -d text="✅ IG → YT Automation Successful 🎉" \
+            -d parse_mode=Markdown
+
+      - name: ❌ Telegram failure alert
+        if: failure()
+        run: |
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage \
+            -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            -d text="❌ IG → YT Automation Failed. Check log.txt and debug_screenshot." \
+            -d parse_mode=Markdown
