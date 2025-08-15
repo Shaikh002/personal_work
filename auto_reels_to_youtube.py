@@ -447,15 +447,14 @@ async def upload_debug_screenshot_and_html(page):
     except Exception as e:
         send_telegram(f"❌ Failed to upload debug screenshot: {e}")
 
+# ---------------------- Reel Fetching Logic ----------------------
+
+
 async def fetch_reel_links():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
         )
         context = await browser.new_context(
             user_agent=USER_AGENT_IPHONE,
@@ -474,16 +473,18 @@ async def fetch_reel_links():
             await page.wait_for_load_state("networkidle")
             await asyncio.sleep(3)
 
-            # ⬇️ Old manual scroll logic
-            for _ in range(10):  # 🔁 Increase or reduce based on how many reels to load
+            for _ in range(10):
                 await page.mouse.wheel(0, 2000)
                 await asyncio.sleep(1.5)
 
-            # ⬇️ Extract all reel links
             hrefs = await page.eval_on_selector_all(
                 'a[href*="/reel/"]',
                 "els => els.map(e => e.href)"
             )
+
+            print(f"🔗 Reels fetched: {len(hrefs)}")
+            for h in hrefs[:5]:
+                print("Sample reel:", h)
 
             if not hrefs:
                 await upload_debug_screenshot_and_html(page)
@@ -495,30 +496,46 @@ async def fetch_reel_links():
         except Exception as e:
             send_telegram(f"❌ IG Reel Fetch Error: {e}")
             return []
-
         finally:
             await browser.close()
 
+
+# ---------------------- Main Upload Logic ----------------------
+def extract_shortcode(url):
+    return url.split("/")[-2]
 
 async def main():
     send_telegram(f"🚀 Starting IG → YT run | Profile: @{INSTAGRAM_PROFILE} | Limit: {UPLOAD_LIMIT}")
     processed = load_processed()
     reels = await fetch_reel_links()
-    to_upload = [r for r in reels if r not in processed][:UPLOAD_LIMIT]
+
+    to_upload = []
+    for url in reels:
+        shortcode = extract_shortcode(url)
+        if shortcode not in processed:
+            to_upload.append((url, shortcode))
+        if len(to_upload) >= UPLOAD_LIMIT:
+            break
 
     if not to_upload:
-      print("⚠️ No new reels found. Sending alert...")
-      send_telegram("⚠️ No new reels found. Either all reels are uploaded or fetch failed.")
-      return
+        print("⚠️ No new reels found. Sending alert...")
+        send_telegram("⚠️ No new reels found. Either all reels are uploaded or fetch failed.")
+        return
 
-
-    for idx, link in enumerate(to_upload, start=1):
+    for idx, (link, shortcode) in enumerate(to_upload, start=1):
         try:
             file, clean_caption, filtered_tags = download_reel(link, idx=idx, total=len(to_upload))
             success = upload_to_youtube(file, clean_caption, filtered_tags)
-            processed.add(link)
+            if success:
+                processed.add(shortcode)
+                print(f"✅ Uploaded: {shortcode}")
             os.remove(file)
         except Exception as e:
             send_telegram(f"❌ Processing error for {link}: {e}")
 
     save_processed(processed)
+
+
+# ---------------------- Run It ----------------------
+if __name__ == "__main__":
+    asyncio.run(main())
