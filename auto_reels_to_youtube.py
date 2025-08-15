@@ -454,7 +454,12 @@ async def fetch_reel_links():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=False,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+            args=[
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+    ]
         )
         context = await browser.new_context(
             user_agent=USER_AGENT_IPHONE,
@@ -523,15 +528,24 @@ async def main():
         return
 
     for idx, (link, shortcode) in enumerate(to_upload, start=1):
-        try:
-            file, clean_caption, filtered_tags = download_reel(link, idx=idx, total=len(to_upload))
-            success = upload_to_youtube(file, clean_caption, filtered_tags)
-            if success:
-                processed.add(shortcode)
-                print(f"✅ Uploaded: {shortcode}")
-            os.remove(file)
-        except Exception as e:
-            send_telegram(f"❌ Processing error for {link}: {e}")
+      try:
+        print(f"⬇️ Downloading {link}")
+        file, clean_caption, filtered_tags = download_reel(link, idx=idx, total=len(to_upload))
+        print(f"📤 Uploading to YT: {file}")
+        send_telegram(f"⏫ Uploading {shortcode} to YouTube…")
+
+        success = upload_to_youtube(file, clean_caption, filtered_tags)
+
+        if success:
+            print(f"✅ Uploaded: {shortcode}")
+            send_telegram(f"✅ Uploaded {shortcode} successfully!")
+            processed.add(shortcode)
+
+        os.remove(file)
+
+      except Exception as e:
+        send_telegram(f"❌ Processing error for {link}: {e}")
+
 
     save_processed(processed)
 
