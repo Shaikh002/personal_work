@@ -453,14 +453,17 @@ async def upload_debug_screenshot_and_html(page):
 async def fetch_reel_links():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False,
-            args=[
+    headless=True,
+    args=[
         "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
         "--disable-dev-shm-usage",
-        "--disable-gpu"
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disable-setuid-sandbox"
     ]
-        )
+)
+
         context = await browser.new_context(
             user_agent=USER_AGENT_IPHONE,
             viewport={"width": 375, "height": 812},
