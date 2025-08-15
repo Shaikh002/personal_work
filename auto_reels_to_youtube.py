@@ -455,14 +455,17 @@ async def fetch_reel_links():
         browser = await p.chromium.launch(
     headless=True,
     args=[
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
-        "--disable-setuid-sandbox"
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-features=UseOzonePlatform",
+        "--disable-blink-features=AutomationControlled",
+        "--use-gl=swiftshader",
+        "--ignore-gpu-blocklist"
     ]
 )
+
 
         context = await browser.new_context(
             user_agent=USER_AGENT_IPHONE,
