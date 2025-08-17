@@ -2,8 +2,8 @@ name: Upload IG Reel to YouTube
 
 on:
   schedule:
-    # 11:30 PM IST → 18:00 UTC
-    - cron: '0 18 * * *'
+    # 11:30 AM IST → 18:00 UTC
+    - cron: '0 6 * * *'
     #  5:00 PM IST → 11:30 UTC
     - cron: '30 11 * * *'
     #  8:30 PM IST → 15:00 UTC
